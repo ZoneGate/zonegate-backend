@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+*.egg-info
+.pytest_cache/
+
+# Virtual environments
+.venv/
+
+# Local databases and secrets
+.env
+nokia_mcp.json
+data/
+.docker/
+*.zova
+*.zova-shm
+*.zova-wal

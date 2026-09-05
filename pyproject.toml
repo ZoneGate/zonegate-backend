@@ -1,0 +1,31 @@
+[project]
+name = "zonegate"
+version = "0.1.0"
+description = "Network-attested authorization system for critical human actions"
+readme = "README.md"
+requires-python = "==3.14.*"
+dependencies = [
+    "zova==1.0.0-rc2",
+    "litestar>=2.24.0",
+    "pydantic>=2.10.0",
+    "langgraph>=1.2.0",
+    "httpx>=0.28.0",
+    "ollama>=0.6.0",
+    "uvicorn>=0.34.0",
+    "pydantic-settings>=2.15.0",
+    "google-genai>=2.22.0",
+    "mcp>=2.1.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.litestar]
+app = "zonegate.app:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

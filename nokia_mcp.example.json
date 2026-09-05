@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "RapidAPI Hub - Network as Code": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://mcp.prodeu.apihub.nokia.io",
+        "--header",
+        "x-api-host: network-as-code.nokia.rapidapi.com",
+        "--header",
+        "x-api-key: YOUR_RAPIDAPI_KEY_HERE"
+      ]
+    }
+  }
+}

@@ -1,0 +1,29 @@
+services:
+  zonegate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zonegate-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - APP_ENV=production
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+      - LITESTAR_APP=zonegate.app:app
+      - ZOVA_DB_PATH=/app/.docker/zonegate.zova
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - NOKIA_BASE_URL=${NOKIA_BASE_URL:-https://api.nokia.example.com}
+      - NOKIA_API_KEY=${NOKIA_API_KEY:-mock-nokia-api-key}
+    volumes:
+      - ./.docker:/app/.docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
