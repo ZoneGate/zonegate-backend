@@ -34,7 +34,7 @@ class AuthorizationService:
     7. Canonical evidence normalization
     8. AI Context Evaluation (advisory)
     9. Deterministic Policy Engine evaluation (authoritative)
-    10. State & receipt persistence in Zova 1.0.0-rc2
+    10. State & receipt persistence in Zova 1.0.0-rc.3
     11. Scoped token generation (on APPROVE only)
     """
 

@@ -1370,7 +1370,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
     { name = "uvicorn", specifier = ">=0.34.0" },
-    { name = "zova", specifier = "==1.0.0rc2" },
+    { name = "zova", specifier = "==1.0.0rc3" },
 ]
 
 [package.metadata.requires-dev]
@@ -1381,13 +1381,13 @@ dev = [
 
 [[package]]
 name = "zova"
-version = "1.0.0rc2"
+version = "1.0.0rc3"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2b/e4/0622aa6be3452fc6d0dea5ff891d03e434be8cb95b9bd410a5f89d9f11c5/zova-1.0.0rc2-cp313-abi3-macosx_10_12_x86_64.whl", hash = "sha256:c10581084f924174cc38c797d39dfc4179621060b78a7f73939aff79de29e917", size = 1687228, upload-time = "2026-09-05T17:53:14.896Z" },
-    { url = "https://files.pythonhosted.org/packages/59/e4/8038788a9028f5b4d7efb4707a8cf1879657a1e8b5047ef02108f68e77d9/zova-1.0.0rc2-cp313-abi3-macosx_11_0_arm64.whl", hash = "sha256:64bf1b9b4229ad389c87fadce2ef10b80398514634b31e44f2f3b1143900a1f9", size = 1582018, upload-time = "2026-09-05T17:53:16.082Z" },
-    { url = "https://files.pythonhosted.org/packages/b2/c2/c7bc5a6b270d099be315e5277ae6b7681f650f64b937706354a25900072e/zova-1.0.0rc2-cp313-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:e44c06f3139492c85fd9935ab7a4c1b43256f5a75a56990d672be6c6e8ecc342", size = 1797210, upload-time = "2026-09-05T17:53:17.488Z" },
-    { url = "https://files.pythonhosted.org/packages/9d/91/1ca042e2c63bedeac9085a9f7df114c0bfb14ca5c48b2f9993dead04d3a9/zova-1.0.0rc2-cp313-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:186e2c77b20eb1165815c5d472544db8b13283448d2d4a6ca9d098df7f46e86c", size = 1846153, upload-time = "2026-09-05T17:53:18.524Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/3b/432b9ed544a249f2a430de5969c3d8f2592053bbb44c104f0ddb2d77e741/zova-1.0.0rc3-cp313-abi3-macosx_10_12_x86_64.whl", hash = "sha256:94cd11d9c2111ad95efeffbf238942bb9486e5df144221e3077e01f288044234", size = 1687751, upload-time = "2026-09-07T19:43:17.87Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/e8/0c62199ba259a6999d5b1af12fa8ec728d2576532f5ec4eeccbfd3f7d4df/zova-1.0.0rc3-cp313-abi3-macosx_11_0_arm64.whl", hash = "sha256:7956f29d3062699d58fc98fa9653b2c34d4f827b35229837a31bbbd4665e90ef", size = 1583106, upload-time = "2026-09-07T19:43:19.04Z" },
+    { url = "https://files.pythonhosted.org/packages/66/36/a01a711385d883649e86733d86385e132dcdedfb85d4e9f2ae8e6b944bcf/zova-1.0.0rc3-cp313-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:740c38fcdaa8eec7d7589354e2c688ea9fc56d763a0157ec333e92ec15966372", size = 1741724, upload-time = "2026-09-07T19:43:20.259Z" },
+    { url = "https://files.pythonhosted.org/packages/40/d3/3a76940cd45064519253f61e2e2989ac4efb7a9c9c9ec9a288d1b07f20f4/zova-1.0.0rc3-cp313-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:20dcc69b6d0b27dc1461e7aa8cb9dd49e3d58aa40ac3e4ea2eaa05744c958199", size = 1805504, upload-time = "2026-09-07T19:43:21.589Z" },
 ]
 
 [[package]]

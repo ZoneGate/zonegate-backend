@@ -13,10 +13,10 @@ T = TypeVar("T")
 
 
 class ZoneGateStore:
-    """Narrow ZoneGate-specific storage boundary backed strictly by Zova 1.0.0-rc2.
+    """Narrow ZoneGate-specific storage boundary backed strictly by Zova 1.0.0-rc.3.
 
     Translates between ZoneGate domain objects and Zova's native embedded storage.
-    Note on Zova 1.0.0-rc2 Architecture:
+    Note on Zova 1.0.0-rc.3 Architecture:
     `zova_python::database::PyDatabase` is unsendable across OS threads (!Send).
     ZoneGateStore pins all Database lifecycle and operations to a dedicated single-threaded
     worker, ensuring thread safety and preventing cross-thread drop panics.

@@ -52,7 +52,7 @@ APPROVE / HOLD / DENY
 ## 3. Strict Hard Version & Dependency Constraints
 
 - **Python Runtime**: `CPython 3.14` (`requires-python = "==3.14.*"` in [pyproject.toml](file:///Users/atasesli/Desktop/VsCode/zonegate-backend/pyproject.toml)). Do not downgrade Python.
-- **Persistence Engine**: `Zova 1.0.0-rc2` (`zova = "1.0.0-rc2"`). Do not substitute SQLAlchemy, SQLite, Redis, or other databases.
+- **Persistence Engine**: `Zova 1.0.0-rc.3` (`zova = "1.0.0rc3"`). Do not substitute SQLAlchemy, SQLite, Redis, or other databases.
 - **HTTP Framework**: Litestar 2.x.
 - **Domain Modeling**: Pydantic v2 with `ConfigDict(extra="forbid")`.
 - **Package Manager**: `uv` exclusively.
@@ -106,7 +106,7 @@ When the Context Evaluation Agent invokes carrier tools via the Nokia Network as
 | **AI Agents** | [`base.py`](file:///Users/atasesli/Desktop/VsCode/zonegate-backend/src/zonegate/agent/base.py)<br>[`ollama.py`](file:///Users/atasesli/Desktop/VsCode/zonegate-backend/src/zonegate/agent/ollama.py)<br>[`gemini.py`](file:///Users/atasesli/Desktop/VsCode/zonegate-backend/src/zonegate/agent/gemini.py)<br>[`evidence_planner.py`](file:///Users/atasesli/Desktop/VsCode/zonegate-backend/src/zonegate/agent/evidence_planner.py)<br>[`context_evaluator.py`](file:///Users/atasesli/Desktop/VsCode/zonegate-backend/src/zonegate/agent/context_evaluator.py)<br>[`graph.py`](file:///Users/atasesli/Desktop/VsCode/zonegate-backend/src/zonegate/agent/graph.py) | Dual-provider AI runtime (local Ollama or Google GenAI SDK) driving LangGraph advisory stages and MCP tool calling. |
 | **Policy Engine** | [`engine.py`](file:///Users/atasesli/Desktop/VsCode/zonegate-backend/src/zonegate/policy/engine.py) | Deterministic, rule-based decision evaluator (`APPROVE`, `HOLD`, `DENY`). |
 | **Authorization** | [`service.py`](file:///Users/atasesli/Desktop/VsCode/zonegate-backend/src/zonegate/authorization/service.py)<br>[`token.py`](file:///Users/atasesli/Desktop/VsCode/zonegate-backend/src/zonegate/authorization/token.py) | End-to-end pipeline coordinator and single-use scoped HMAC authorization token issuer. |
-| **Persistence** | [`zova.py`](file:///Users/atasesli/Desktop/VsCode/zonegate-backend/src/zonegate/storage/zova.py) | Zova 1.0.0-rc2 embedded KV store with namespaced partitions and atomic commits. |
+| **Persistence** | [`zova.py`](file:///Users/atasesli/Desktop/VsCode/zonegate-backend/src/zonegate/storage/zova.py) | Zova 1.0.0-rc.3 embedded KV store with namespaced partitions and atomic commits. |
 
 ---
 

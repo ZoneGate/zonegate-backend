@@ -43,7 +43,7 @@ def create_app(settings: Settings | None = None) -> Litestar:
 
     @asynccontextmanager
     async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
-        # Initialize Zova 1.0.0-rc2 embedded storage
+        # Initialize Zova 1.0.0-rc.3 embedded storage
         store = ZoneGateStore.open_or_create(cfg.ZOVA_DB_PATH)
 
         # Select LLM Provider: Gemini or Ollama

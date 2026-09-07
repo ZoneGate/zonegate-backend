@@ -1,5 +1,5 @@
 # Production Dockerfile for ZoneGate Backend
-# Requirements: CPython 3.14, Zova 1.0.0-rc2, Litestar 2.x, uv
+# Requirements: CPython 3.14, Zova 1.0.0-rc.3, Litestar 2.x, uv
 FROM python:3.14-slim AS base
 
 # Install uv binary from official image
