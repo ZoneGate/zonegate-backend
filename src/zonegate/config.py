@@ -19,10 +19,13 @@ class Settings(BaseSettings):
     # Ollama Configuration
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3.2"
+    # A cold model load costs far more than a warm generation, so the
+    # default has to survive the first request after Ollama starts.
+    OLLAMA_TIMEOUT: float = 120.0
 
     # Google Gemini Configuration
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-3.6-flash"
 
     # Nokia / CAMARA Gateway Configuration
     NOKIA_BASE_URL: str = "https://api.nokia.example.com"
@@ -35,6 +38,9 @@ class Settings(BaseSettings):
 
     # Zova Persistence
     ZOVA_DB_PATH: str = "data/zonegate.zova"
+
+    # Browser origins permitted to call the API (comma separated)
+    CORS_ALLOW_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
 
 @lru_cache(maxsize=1)
