@@ -5,6 +5,9 @@ FROM python:3.14-slim AS base
 # Install uv binary from official image
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+# Node.js runtime: required by the Nokia MCP client, which spawns `npx mcp-remote` over stdio
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm ca-certificates && rm -rf /var/lib/apt/lists/*
+
 # System & runtime environment configuration
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -25,8 +28,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
 # Copy source tree and metadata
-COPY README.md pyproject.toml /app/
+COPY README.md pyproject.toml uv.lock /app/
 COPY src/ /app/src/
+COPY scripts/ /app/scripts/
 
 # Install the project itself into the virtual environment
 RUN --mount=type=cache,target=/root/.cache/uv \

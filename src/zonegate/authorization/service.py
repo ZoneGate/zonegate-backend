@@ -5,7 +5,13 @@ from zonegate.agent.context_evaluator import ContextEvaluator
 from zonegate.agent.evidence_planner import EvidencePlanner
 from zonegate.agent.graph import build_context_evaluation_graph, build_evidence_planning_graph
 from zonegate.authorization.token import TokenService
-from zonegate.domain.decisions import ContextEvaluation, DecisionOutcome, PolicyDecision, RecommendedControl
+from zonegate.domain.decisions import (
+    ContextEvaluation,
+    DecisionOutcome,
+    HoldResolution,
+    PolicyDecision,
+    RecommendedControl,
+)
 from zonegate.domain.evidence import CanonicalEvidence, ValidatedEvidencePlan
 from zonegate.domain.receipts import Receipt
 from zonegate.domain.transactions import TransactionRequest
@@ -20,6 +26,14 @@ logger = logging.getLogger(__name__)
 
 class AuthorizationServiceError(Exception):
     """Base exception for authorization service orchestration failures."""
+
+
+class DecisionNotFoundError(AuthorizationServiceError):
+    """Raised when a referenced policy decision does not exist."""
+
+
+class HoldResolutionError(AuthorizationServiceError):
+    """Raised when a decision is not eligible for human resolution."""
 
 
 class AuthorizationService:
@@ -64,6 +78,95 @@ class AuthorizationService:
         self._context_graph = (
             build_context_evaluation_graph(context_evaluator) if context_evaluator else None
         )
+
+    async def resolve_hold(
+        self,
+        decision_id: str,
+        outcome: DecisionOutcome,
+        resolved_by: str,
+        note: str = "",
+    ) -> tuple[PolicyDecision, Receipt]:
+        """Records the binding decision of the human authority a HOLD was handed to.
+
+        The policy engine's own outcome is never rewritten: the stored decision stays
+        HOLD and the human verdict is attached as a separate resolution record. Only a
+        HOLD is eligible, so a deterministic DENY can never be overridden by a person.
+        """
+        decision = await self.store.get_decision(decision_id)
+        if not decision:
+            raise DecisionNotFoundError(f"Decision '{decision_id}' not found")
+
+        if decision.decision != DecisionOutcome.HOLD:
+            raise HoldResolutionError(
+                f"Decision '{decision_id}' is {decision.decision} and is not open to human "
+                "resolution. Only a HOLD transfers authority to a person."
+            )
+
+        if decision.resolution is not None:
+            raise HoldResolutionError(
+                f"Decision '{decision_id}' was already resolved as "
+                f"{decision.resolution.outcome} by {decision.resolution.resolved_by}"
+            )
+
+        if outcome not in (DecisionOutcome.APPROVE, DecisionOutcome.DENY):
+            raise HoldResolutionError(
+                "A human resolution must be either APPROVE or DENY"
+            )
+
+        now = datetime.now(timezone.utc)
+        resolution = HoldResolution(
+            outcome=outcome,
+            resolved_by=resolved_by,
+            authority_role=decision.required_authority or "UNSPECIFIED_AUTHORITY",
+            note=note,
+            resolved_at=now,
+        )
+
+        resolved = decision.model_copy(update={"resolution": resolution})
+        await self.store.save_decision(resolved)
+
+        receipt = await self.store.get_receipt_by_transaction_id(decision.transaction_id)
+        if receipt is None:
+            receipt = Receipt(
+                receipt_id=f"rcpt_{decision.decision_id}",
+                decision_id=decision.decision_id,
+                transaction_id=decision.transaction_id,
+                decision=decision.decision,
+                issued_at=now,
+                token=None,
+            )
+
+        token_str = receipt.token
+        if outcome == DecisionOutcome.APPROVE:
+            transaction = await self.store.get_transaction(decision.transaction_id)
+            if transaction is None:
+                raise HoldResolutionError(
+                    f"Transaction '{decision.transaction_id}' is no longer on record"
+                )
+
+            scoped_token = self.token_service.issue_token(
+                actor_id=transaction.actor_id,
+                action=transaction.action,
+                resource_id=transaction.resource_id,
+                zone=transaction.zone,
+                decision_id=decision.decision_id,
+            )
+            token_str = scoped_token.token_id
+            await self.store.save_token(scoped_token)
+
+        updated_receipt = receipt.model_copy(
+            update={"issued_at": now, "token": token_str}
+        )
+        await self.store.save_receipt(updated_receipt)
+
+        logger.info(
+            "HOLD %s resolved as %s by %s (%s)",
+            decision.decision_id,
+            outcome,
+            resolved_by,
+            resolution.authority_role,
+        )
+        return resolved, updated_receipt
 
     async def authorize_transaction(
         self,

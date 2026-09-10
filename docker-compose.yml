@@ -1,4 +1,31 @@
+# The backend on its own: API, a stand-in carrier, and the test suite.
+#
+#   docker compose up -d                          # API on :8000
+#   docker compose --profile tools run --rm test  # the suite
+#
+# Docker is the only prerequisite. The console and the mobile app each bring
+# their own compose file; the three together are wired up by the stack compose
+# described in the README.
+
+name: zonegate-backend
+
 services:
+  # Stands in for Nokia CAMARA. It has to be reachable before the API collects
+  # evidence, or every decision comes back DENY.
+  camara-mock:
+    build:
+      context: .
+    working_dir: /src
+    command: ["/app/.venv/bin/python", "scripts/mock_camara.py"]
+    entrypoint: []
+    volumes:
+      - ./scripts:/src/scripts
+    environment:
+      MOCK_CAMARA_PORT: "8899"
+    ports:
+      # Exposed so the scenario file can be driven from the host.
+      - "8899:8899"
+
   zonegate:
     build:
       context: .
@@ -6,24 +33,50 @@ services:
     container_name: zonegate-backend
     ports:
       - "8000:8000"
-    env_file:
-      - path: .env
-        required: false
+    # Deliberately no env_file. A local .env is written for running the app
+    # directly on the host, and its addresses are wrong inside a container --
+    # pointing NOKIA_BASE_URL at a host or a placeholder makes every decision
+    # DENY on a carrier error. Note that Compose also reads .env to substitute
+    # ${...} below, so anything that describes the container's own world is
+    # written literally here and cannot be hijacked by that file.
     environment:
       - APP_ENV=production
       - APP_HOST=0.0.0.0
       - APP_PORT=8000
       - LITESTAR_APP=zonegate.app:app
       - ZOVA_DB_PATH=/app/.docker/zonegate.zova
+      # The mock, reachable on the compose network. To decide on a real
+      # carrier, use CARRIER_URL and CARRIER_KEY (see the README).
+      - NOKIA_BASE_URL=${CARRIER_URL:-http://camara-mock:8899}
+      - NOKIA_API_KEY=${CARRIER_KEY:-mock-nokia-api-key}
+      # The mock speaks REST, not MCP.
+      - NOKIA_MCP_ENABLED=false
+      - NOKIA_MCP_CONFIG_PATH=/app/.docker/nokia_mcp.json
+      - NOKIA_MCP_STATIC_ALLOWLIST=
       - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      # A cold model load can take ~30s; the default has to clear that.
+      - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-120}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
-      - NOKIA_BASE_URL=${NOKIA_BASE_URL:-https://api.nokia.example.com}
-      - NOKIA_API_KEY=${NOKIA_API_KEY:-mock-nokia-api-key}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.6-flash}
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     volumes:
       - ./.docker:/app/.docker
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - camara-mock
     restart: unless-stopped
+
+  # The suite, in the same image the API ships from.
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    working_dir: /src
+    entrypoint: []
+    command: ["/app/.venv/bin/python", "-m", "pytest", "tests", "-q"]
+    volumes:
+      - .:/src
+    profiles: ["tools"]

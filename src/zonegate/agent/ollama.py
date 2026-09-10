@@ -34,7 +34,7 @@ class OllamaClient:
         self,
         base_url: str = "http://localhost:11434",
         model: str = "llama3.2",
-        timeout: float = 30.0,
+        timeout: float = 120.0,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -88,8 +88,18 @@ class OllamaClient:
                 if not content:
                     raise OllamaStructuredOutputError("Ollama response contained empty content")
                 return response_model.model_validate_json(content)
-            except (httpx.ConnectError, httpx.TimeoutException) as exc:
-                logger.error("Ollama connection failed: %s", exc)
+            except httpx.TimeoutException as exc:
+                logger.error(
+                    "Ollama timed out after %.0fs at %s (model '%s'); a cold model load "
+                    "can exceed this - raise OLLAMA_TIMEOUT if it recurs",
+                    self.timeout, self.base_url, self.model,
+                )
+                raise OllamaServiceUnavailableError(
+                    f"Ollama timed out after {self.timeout:.0f}s at {self.base_url} "
+                    f"(model '{self.model}')"
+                ) from exc
+            except httpx.ConnectError as exc:
+                logger.error("Ollama unreachable at %s: %s", self.base_url, exc)
                 raise OllamaServiceUnavailableError(f"Ollama service unavailable at {self.base_url}: {exc}") from exc
             except (ValidationError, json.JSONDecodeError, OllamaStructuredOutputError) as exc:
                 last_err = exc

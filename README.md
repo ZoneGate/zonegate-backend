@@ -124,7 +124,7 @@ OLLAMA_MODEL=llama3.2
 
 # Google Gemini Configuration (when LLM_PROVIDER=gemini)
 GEMINI_API_KEY=your-gemini-api-key-here
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.6-flash
 
 NOKIA_BASE_URL=https://api.nokia.example.com
 NOKIA_API_KEY=mock-nokia-api-key
@@ -163,20 +163,136 @@ curl http://127.0.0.1:8000/health
 ```
 
 ### 7. Run with Docker Compose
-To build and start the container with persistent storage and environment configuration automatically:
+
+Docker is the only prerequisite. Compose brings up the API together with the
+mock carrier it needs:
+
 ```bash
 docker compose up --build -d
 ```
 
-View application logs:
+- API — <http://127.0.0.1:8000>
+- Mock carrier — `127.0.0.1:8899`
+
 ```bash
-docker compose logs -f zonegate
+docker compose logs -f zonegate    # follow the pipeline
+docker compose down                # stop
 ```
 
-Stop the container:
+Decisions are written to `.docker/zonegate.zova` on the host and survive a
+`down`.
+
+**A local `.env` does not configure the container, and must not.** That file is
+written for running the app directly on the host, where `NOKIA_BASE_URL` and
+`ZOVA_DB_PATH` mean different things than they do inside a container. Compose
+reads `.env` when substituting `${...}`, so anything describing the container's
+own world -- the carrier address, the MCP flag, the database path -- is written
+literally in `docker-compose.yml` where that file cannot reach it. Getting this
+wrong is not a visible failure: the gateway ends up pointed at a domain that
+does not resolve and **every decision comes back DENY** on a carrier error.
+
+To decide on a real carrier instead of the mock:
+
 ```bash
-docker compose down
+CARRIER_URL=https://your-carrier.example.com CARRIER_KEY=... docker compose up -d
 ```
+
+### Tests
+
+```bash
+docker compose --profile tools run --rm test
+```
+
+161 tests. They are hermetic -- never reaching a live Gemini, Ollama or Nokia
+endpoint, whatever a local `.env` says. The package is installed into the
+image, so after changing anything under `src/` rebuild before re-running:
+`docker compose --profile tools build test`.
+
+---
+
+## Running the Demo Stack (API + Dashboard)
+
+The dashboard at [zonegate-website](https://github.com/ZoneGate/zonegate-website)
+talks to this API over CORS. Origins are configured with `CORS_ALLOW_ORIGINS`
+(default `http://localhost:3000,http://127.0.0.1:3000`). `PUT` must stay in the
+allowed methods or saving policy thresholds from the console fails as a
+preflight rejection, with nothing useful shown in the browser.
+
+### 1. Enrol an actor
+
+The store starts empty, and an unenrolled actor is denied by design:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/actors -H 'Content-Type: application/json'   -d '{"actor":{"actor_id":"usr_cargo_operator_01","role":"ROLE_CARGO_OPERATOR","permissions":["cargo:release","cargo:inspect"],"registered_phone_number":"+14155550199","registered_device_id":"dev_imei_99887766","enrollment_status":"ACTIVE"}}'
+```
+
+There is also a seed script. Zova is an **embedded** database: if the API
+server holds the file open, writes from a second process are silently lost with
+no error. Stop the server first:
+
+```bash
+docker compose stop zonegate
+docker compose run --rm zonegate python scripts/seed.py
+docker compose start zonegate
+```
+
+### 2. Drive a scenario
+
+The mock carrier runs as a compose service and needs no separate start.
+
+The mock listens on `8899` (override with `MOCK_CAMARA_PORT`) and reads its
+scenario from `scripts/camara_state.json`. Edit that file between requests to
+drive a specific outcome — setting `"location_verified": false` turns the next
+release request into the blocked presence-attack case:
+
+```json
+{"number_verified": true, "location_verified": false, "sim_swapped": false,
+ "device_swapped": false, "reachability": "CONNECTED_DATA"}
+```
+
+Stage a scenario by editing `scripts/camara_state.json` while it runs:
+
+```json
+{"location_verified": false}
+```
+
+### 3. Start the dashboard
+
+```bash
+cd ../zonegate-website/zonegate-web
+cp .env.example .env.local     # NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+npm install && npm run dev
+```
+
+The Hold Queue at `http://localhost:3000/holds` reads live decisions from this
+API and posts the supervisor's verdict back.
+
+---
+
+## HOLD: Human Authority Transfer
+
+A `HOLD` hands the decision to the role named in `required_authority`. The
+designated human decides on the **same evidence package** the policy engine
+used — no new input is requested.
+
+- `GET /v1/authorizations?decision=HOLD&pending=true` — the queue awaiting a human
+- `GET /v1/authorizations/{decision_id}/context` — decision + transaction + evidence + plan + receipt
+- `POST /v1/authorizations/{decision_id}/resolve` — the binding verdict
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/authorizations/dec_abc123/resolve   -H "Content-Type: application/json"   -d '{"outcome":"APPROVE","resolved_by":"OFFICER K. VANCE","note":"Verified with the berth master."}'
+```
+
+Enforced invariants:
+
+- **Only a HOLD is resolvable.** Resolving an `APPROVE` or a deterministic `DENY`
+  returns `409`. A hard DENY can never be overridden by a person.
+- **The policy outcome is never rewritten.** The stored decision stays `HOLD`;
+  the human verdict is attached as a separate `resolution` record, so the audit
+  trail shows both what the engine decided and what the person decided.
+- **One resolution per decision.** A second attempt returns `409`.
+- **APPROVE issues a scoped token** bound to the actor, action, resource and
+  zone of the original transaction; DENY issues none.
 
 ---
 
@@ -185,9 +301,16 @@ docker compose down
 ### Health
 - `GET /health`: Returns service health and reachability of dependencies (Zova, Ollama, Nokia).
 
+### Actors
+- `POST /v1/actors`: Enrolls an actor and binds their device. Required before any request can pass the gateway.
+- `GET /v1/actors/{actor_id}`: Retrieves an enrolled actor with their active device binding.
+
 ### Authorizations
 - `POST /v1/authorizations`: Evaluates a transaction request through the full authorization pipeline. Returns the authoritative `PolicyDecision` and an audit `Receipt`.
+- `GET /v1/authorizations`: Lists decisions newest first. Supports `?decision=HOLD`, `?pending=true` and `?limit=`.
 - `GET /v1/authorizations/{decision_id}`: Retrieves an existing policy decision record from Zova.
+- `GET /v1/authorizations/{decision_id}/context`: Returns the decision together with the transaction, canonical evidence, evidence plan and receipt behind it.
+- `POST /v1/authorizations/{decision_id}/resolve`: Records the binding human decision on a HOLD.
 
 ### Receipts
 - `GET /v1/receipts/{receipt_id}`: Retrieves an issued action receipt (including scoped authorization token if approved).

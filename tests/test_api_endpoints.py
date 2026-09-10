@@ -81,7 +81,7 @@ async def test_actor_and_device_enrollment_api():
     app = create_app(test_settings)
 
     async with AsyncTestClient(app=app) as client:
-        # 1. Enroll Actor via POST /v1/actors
+        # 1. Enroll Actor via POST /v1/actors with EnrollmentRequest
         actor_data = {
             "actor_id": "usr_custom_operator",
             "role": "SECURITY_OFFICER",
@@ -90,31 +90,22 @@ async def test_actor_and_device_enrollment_api():
             "registered_device_id": "dev_sec_99",
             "enrollment_status": "ACTIVE",
         }
-        res = await client.post("/v1/actors", json=actor_data)
+        res = await client.post("/v1/actors", json={"actor": actor_data})
         assert res.status_code in (200, 201)
-        assert res.json()["actor_id"] == "usr_custom_operator"
+        data = res.json()
+        assert data["actor"]["actor_id"] == "usr_custom_operator"
+        assert data["binding"]["device_id"] == "dev_sec_99"
 
         # 2. Get Actor via GET /v1/actors/{actor_id}
         get_res = await client.get("/v1/actors/usr_custom_operator")
         assert get_res.status_code == 200
-        assert get_res.json()["registered_phone_number"] == "+14155559988"
+        assert get_res.json()["actor"]["registered_phone_number"] == "+14155559988"
 
-        # 3. Enroll Device Binding via POST /v1/device-bindings
-        binding_data = {
-            "actor_id": "usr_custom_operator",
-            "phone_number": "+14155559988",
-            "device_id": "dev_sec_99",
-            "bound_at": "2026-09-08T10:00:00Z",
-            "is_active": True,
-        }
-        b_res = await client.post("/v1/device-bindings", json=binding_data)
-        assert b_res.status_code in (200, 201)
-        assert b_res.json()["device_id"] == "dev_sec_99"
-
-        # 4. Get Device Binding via GET /v1/device-bindings/{actor_id}
-        b_get_res = await client.get("/v1/device-bindings/usr_custom_operator")
-        assert b_get_res.status_code == 200
-        assert b_get_res.json()["device_id"] == "dev_sec_99"
+        # 3. List actors via GET /v1/actors (Roster)
+        list_res = await client.get("/v1/actors")
+        assert list_res.status_code == 200
+        roster = list_res.json()
+        assert any(entry["actor"]["actor_id"] == "usr_custom_operator" for entry in roster)
 
 
 @pytest.mark.asyncio
@@ -126,7 +117,17 @@ async def test_unsupported_action_returns_clean_deny_not_500():
     app = create_app(test_settings)
 
     async with AsyncTestClient(app=app) as client:
-        # Default demo actor usr_cargo_operator_01 is auto-seeded on startup
+        # Enroll actor first
+        actor_data = {
+            "actor_id": "usr_cargo_operator_01",
+            "role": "CARGO_OPERATOR",
+            "permissions": ["cargo:release"],
+            "registered_phone_number": "+358501234567",
+            "registered_device_id": "device_cargo_terminal_01",
+            "enrollment_status": "ACTIVE",
+        }
+        await client.post("/v1/actors", json={"actor": actor_data})
+
         payload = {
             "transaction_id": "tx_unsupported_action_1",
             "actor_id": "usr_cargo_operator_01",
