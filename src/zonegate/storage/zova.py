@@ -1,9 +1,11 @@
 import asyncio
 import concurrent.futures
+import json
 from pathlib import Path
 from typing import Callable, TypeVar
 import zova
 from zonegate.domain.actors import Actor, DeviceBinding
+from zonegate.domain.policy_config import PolicyConfig
 from zonegate.domain.decisions import ContextEvaluation, PolicyDecision
 from zonegate.domain.evidence import CanonicalEvidence, ValidatedEvidencePlan
 from zonegate.domain.receipts import Receipt
@@ -32,6 +34,10 @@ class ZoneGateStore:
     NS_DECISION_TX_INDEX = b"decision_tx_index"
     NS_RECEIPTS = b"receipts"
     NS_RECEIPT_TX_INDEX = b"receipt_tx_index"
+    NS_INDEXES = b"indexes"
+    KEY_DECISION_LIST = b"decisions"
+    KEY_ACTOR_LIST = b"actors"
+    KEY_POLICY_CONFIG = b"policy_config"
 
     def __init__(self, path_str: str) -> None:
         self._path_str = path_str
@@ -96,13 +102,59 @@ class ZoneGateStore:
     async def get_actor(self, actor_id: str) -> Actor | None:
         return await self._run(self._get_actor_sync, actor_id)
 
+    def _read_actor_ids(self) -> list[str]:
+        assert self._db is not None
+        raw = self._db.kv_get(self.NS_INDEXES, self.KEY_ACTOR_LIST)
+        if raw is None:
+            return []
+        return json.loads(raw.decode("utf-8"))
+
     def _save_actor_sync(self, actor: Actor) -> None:
         assert self._db is not None
         raw = actor.model_dump_json().encode("utf-8")
-        self._db.kv_put(self.NS_ACTORS, actor.actor_id.encode("utf-8"), raw)
+
+        # The actor record is keyed by id, so enrolment order lives in its own
+        # index; without it the roster cannot be listed, only looked up.
+        ids = self._read_actor_ids()
+        if actor.actor_id in ids:
+            ids.remove(actor.actor_id)
+        ids.insert(0, actor.actor_id)
+
+        self._db.begin()
+        try:
+            self._db.kv_put(self.NS_ACTORS, actor.actor_id.encode("utf-8"), raw)
+            self._db.kv_put(
+                self.NS_INDEXES,
+                self.KEY_ACTOR_LIST,
+                json.dumps(ids).encode("utf-8"),
+            )
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
 
     async def save_actor(self, actor: Actor) -> None:
         await self._run(self._save_actor_sync, actor)
+
+    def _list_actors_sync(self, limit: int) -> list[Actor]:
+        assert self._db is not None
+        found: list[Actor] = []
+
+        for actor_id in self._read_actor_ids():
+            if len(found) >= limit:
+                break
+
+            raw = self._db.kv_get(self.NS_ACTORS, actor_id.encode("utf-8"))
+            if raw is None:
+                continue
+
+            found.append(Actor.model_validate_json(raw.decode("utf-8")))
+
+        return found
+
+    async def list_actors(self, limit: int = 200) -> list[Actor]:
+        """Returns enrolled actors, most recently enrolled first."""
+        return await self._run(self._list_actors_sync, limit)
 
     # --- Device Bindings ---
 
@@ -123,6 +175,30 @@ class ZoneGateStore:
 
     async def save_device_binding(self, binding: DeviceBinding) -> None:
         await self._run(self._save_device_binding_sync, binding)
+
+    # --- Policy configuration ---
+
+    def _get_policy_config_sync(self) -> PolicyConfig | None:
+        assert self._db is not None
+        raw = self._db.kv_get(self.NS_INDEXES, self.KEY_POLICY_CONFIG)
+        if raw is None:
+            return None
+        return PolicyConfig.model_validate_json(raw.decode("utf-8"))
+
+    async def get_policy_config(self) -> PolicyConfig | None:
+        """Returns the stored thresholds, or None when never configured."""
+        return await self._run(self._get_policy_config_sync)
+
+    def _save_policy_config_sync(self, config: PolicyConfig) -> None:
+        assert self._db is not None
+        self._db.kv_put(
+            self.NS_INDEXES,
+            self.KEY_POLICY_CONFIG,
+            config.model_dump_json().encode("utf-8"),
+        )
+
+    async def save_policy_config(self, config: PolicyConfig) -> None:
+        await self._run(self._save_policy_config_sync, config)
 
     # --- Transactions ---
 
@@ -229,16 +305,33 @@ class ZoneGateStore:
     async def get_decision_by_transaction_id(self, transaction_id: str) -> PolicyDecision | None:
         return await self._run(self._get_decision_by_tx_sync, transaction_id)
 
+    def _read_decision_ids(self) -> list[str]:
+        assert self._db is not None
+        raw = self._db.kv_get(self.NS_INDEXES, self.KEY_DECISION_LIST)
+        if raw is None:
+            return []
+        return json.loads(raw.decode("utf-8"))
+
     def _save_decision_sync(self, decision: PolicyDecision) -> None:
         assert self._db is not None
         raw = decision.model_dump_json().encode("utf-8")
         decision_id_b = decision.decision_id.encode("utf-8")
         tx_id_b = decision.transaction_id.encode("utf-8")
 
+        ids = self._read_decision_ids()
+        if decision.decision_id in ids:
+            ids.remove(decision.decision_id)
+        ids.insert(0, decision.decision_id)
+
         self._db.begin()
         try:
             self._db.kv_put(self.NS_DECISIONS, decision_id_b, raw)
             self._db.kv_put(self.NS_DECISION_TX_INDEX, tx_id_b, decision_id_b)
+            self._db.kv_put(
+                self.NS_INDEXES,
+                self.KEY_DECISION_LIST,
+                json.dumps(ids).encode("utf-8"),
+            )
             self._db.commit()
         except Exception:
             self._db.rollback()
@@ -246,6 +339,38 @@ class ZoneGateStore:
 
     async def save_decision(self, decision: PolicyDecision) -> None:
         await self._run(self._save_decision_sync, decision)
+
+    def _list_decisions_sync(
+        self,
+        outcome: str | None,
+        limit: int,
+    ) -> list[PolicyDecision]:
+        assert self._db is not None
+        found: list[PolicyDecision] = []
+
+        for decision_id in self._read_decision_ids():
+            if len(found) >= limit:
+                break
+
+            raw = self._db.kv_get(self.NS_DECISIONS, decision_id.encode("utf-8"))
+            if raw is None:
+                continue
+
+            decision = PolicyDecision.model_validate_json(raw.decode("utf-8"))
+            if outcome and decision.decision != outcome:
+                continue
+
+            found.append(decision)
+
+        return found
+
+    async def list_decisions(
+        self,
+        outcome: str | None = None,
+        limit: int = 100,
+    ) -> list[PolicyDecision]:
+        """Returns decisions newest first, optionally filtered by outcome."""
+        return await self._run(self._list_decisions_sync, outcome, limit)
 
     # --- Receipts ---
 
@@ -276,3 +401,15 @@ class ZoneGateStore:
 
     async def save_receipt(self, receipt: Receipt) -> None:
         await self._run(self._save_receipt_sync, receipt)
+
+    def _get_receipt_by_tx_sync(self, transaction_id: str) -> Receipt | None:
+        assert self._db is not None
+        receipt_id = self._db.kv_get(
+            self.NS_RECEIPT_TX_INDEX, transaction_id.encode("utf-8")
+        )
+        if receipt_id is None:
+            return None
+        return self._get_receipt_sync(receipt_id.decode("utf-8"))
+
+    async def get_receipt_by_transaction_id(self, transaction_id: str) -> Receipt | None:
+        return await self._run(self._get_receipt_by_tx_sync, transaction_id)

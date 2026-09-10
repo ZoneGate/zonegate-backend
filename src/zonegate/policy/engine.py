@@ -8,6 +8,7 @@ from zonegate.domain.decisions import (
     PolicyDecision,
 )
 from zonegate.domain.evidence import CanonicalEvidence
+from zonegate.domain.policy_config import PolicyConfig
 from zonegate.domain.transactions import TransactionRequest
 
 # Thresholds
@@ -29,12 +30,24 @@ class PolicyEngine:
     def __init__(
         self,
         high_value_threshold: Decimal = HIGH_VALUE_THRESHOLD,
+        config: PolicyConfig | None = None,
     ) -> None:
-        self.high_value_threshold = high_value_threshold
+        # `config` is the current form; the bare threshold argument is kept so
+        # existing callers and tests that pass one keep working.
+        self.config = config or PolicyConfig(
+            high_value_threshold=high_value_threshold
+        )
+
+    @property
+    def high_value_threshold(self) -> Decimal:
+        return self.config.high_value_threshold
 
     def is_outside_expected_window(self, timestamp: datetime) -> bool:
-        """Determines if the timestamp falls outside standard operational window (06:00 - 20:00 local/UTC)."""
-        return timestamp.hour < 6 or timestamp.hour >= 20
+        """Whether the timestamp falls outside the configured operational window."""
+        return (
+            timestamp.hour < self.config.window_start_hour
+            or timestamp.hour >= self.config.window_end_hour
+        )
 
     def evaluate(
         self,
@@ -104,7 +117,9 @@ class PolicyEngine:
 
         if is_high_val and outside_window:
             reasons.append(
-                f"High-value transaction (${transaction.value}) requested outside expected operational window ({transaction.timestamp.strftime('%H:%M')} UTC)"
+                f"High-value transaction (${transaction.value}) requested outside expected operational window "
+                f"({transaction.timestamp.strftime('%H:%M')} UTC; window is "
+                f"{self.config.window_start_hour:02d}:00-{self.config.window_end_hour:02d}:00 UTC)"
             )
             return PolicyDecision(
                 decision_id=decision_id,
