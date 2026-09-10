@@ -9,6 +9,9 @@ async def test_health_endpoint_boots_without_live_dependencies():
     # Configure in-memory database and non-existent external ports
     test_settings = Settings(
         APP_ENV="test",
+        # Pinned explicitly: Settings otherwise inherits LLM_PROVIDER from the ambient
+        # environment / .env, which changes the health key to <provider>_agent_runtime.
+        LLM_PROVIDER="ollama",
         ZOVA_DB_PATH=":memory:",
         OLLAMA_BASE_URL="http://127.0.0.1:59999",  # non-existent port
         NOKIA_BASE_URL="http://127.0.0.1:59998",

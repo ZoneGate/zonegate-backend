@@ -112,3 +112,31 @@ def standard_transaction(standard_actor: Actor) -> TransactionRequest:
         value=Decimal("15000.00"),
         metadata={"shipping_line": "Maersk"},
     )
+
+@pytest.fixture(autouse=True)
+def isolate_from_external_providers(monkeypatch):
+    """Keeps the suite off the network, whatever the developer's `.env` says.
+
+    `Settings` reads `.env`, so a machine configured with a live Gemini key and
+    a real Nokia base URL would otherwise make billed API calls from a test run
+    — slowly, and with results that depend on someone else's service. These
+    overrides win over the file, so every test resolves the same way on every
+    machine.
+    """
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:59999")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setenv("NOKIA_BASE_URL", "http://127.0.0.1:59998")
+    monkeypatch.setenv("NOKIA_API_KEY", "test-key")
+    monkeypatch.setenv("NOKIA_MCP_ENABLED", "false")
+    monkeypatch.setenv("ZOVA_DB_PATH", ":memory:")
+
+
+def install_fake_nokia(app, nokia_client) -> None:
+    """Points a running app's evidence gateway at a deterministic test double.
+
+    The app builds its own live client at startup; swapping it here lets an
+    HTTP-level test exercise APPROVE and HOLD paths, which are unreachable
+    while every carrier call fails.
+    """
+    app.state.gateway._nokia_client = nokia_client
