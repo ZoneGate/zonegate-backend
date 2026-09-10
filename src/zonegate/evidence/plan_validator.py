@@ -32,9 +32,11 @@ class EvidencePlanValidator:
 
         validated_optional: list[EvidenceKind] = []
         rationale: list[str] = []
+        proposed_optional: list[EvidenceKind] = []
 
         if proposed_plan is not None:
             rationale = list(proposed_plan.rationale)
+            proposed_optional = list(proposed_plan.optional_evidence)
             for evidence in proposed_plan.optional_evidence:
                 # 1. Check if explicitly forbidden
                 if evidence in policy.forbidden:
@@ -60,4 +62,7 @@ class EvidencePlanValidator:
             optional=validated_optional,
             combined=combined,
             rationale=rationale,
+            planner_consulted=proposed_plan is not None,
+            offered_optional=sorted(policy.optional, key=lambda k: k.value),
+            proposed_optional=proposed_optional,
         )

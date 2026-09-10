@@ -39,6 +39,22 @@ class ValidatedEvidencePlan(BaseModel):
     combined: list[EvidenceKind] = Field(..., description="Complete set of evidence to be collected")
     rationale: list[str] = Field(default_factory=list, description="Planner rationale")
 
+    # The audit trail of how this plan was reached. The agent is only ever
+    # offered the optional set, so mandatory evidence appearing in `combined`
+    # is always the validator enforcing policy rather than the agent asking.
+    planner_consulted: bool = Field(
+        default=False,
+        description="True if an agent returned a plan; False if planning failed or no agent is attached",
+    )
+    offered_optional: list[EvidenceKind] = Field(
+        default_factory=list,
+        description="Optional evidence kinds the agent was permitted to choose from",
+    )
+    proposed_optional: list[EvidenceKind] = Field(
+        default_factory=list,
+        description="Optional evidence kinds the agent actually asked for, before validation",
+    )
+
 
 class CanonicalEvidence(BaseModel):
     """Normalized, network-attested evidence.
