@@ -34,6 +34,20 @@ class ContextEvaluation(BaseModel):
     )
 
 
+class HoldResolution(BaseModel):
+    """Final, binding decision made by the human authority a HOLD was handed to.
+
+    Only a HOLD can be resolved. A deterministic DENY is never overridable.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: DecisionOutcome = Field(..., description="Final human outcome: APPROVE | DENY")
+    resolved_by: str = Field(..., description="Identifier of the human authority who decided")
+    authority_role: str = Field(..., description="Operational role the policy engine required")
+    note: str = Field(default="", description="Free-text justification recorded for audit")
+    resolved_at: datetime = Field(..., description="UTC timestamp of the human decision")
+
+
 class PolicyDecision(BaseModel):
     """Authoritative authorization decision produced strictly by the deterministic Policy Engine."""
     model_config = ConfigDict(extra="forbid")
@@ -55,3 +69,7 @@ class PolicyDecision(BaseModel):
         description="Sanitized summary of canonical evidence used in policy evaluation",
     )
     decided_at: datetime = Field(..., description="UTC timestamp of the policy decision")
+    resolution: "HoldResolution | None" = Field(
+        default=None,
+        description="Human authority resolution, present only once a HOLD has been decided",
+    )
