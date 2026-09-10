@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 import logging
 from typing import AsyncGenerator
 from litestar import Litestar
+from litestar.config.cors import CORSConfig
 from litestar.datastructures import State
 from litestar.di import Provide
 from litestar.logging import LoggingConfig
@@ -10,8 +11,10 @@ from zonegate.agent.context_evaluator import ContextEvaluator
 from zonegate.agent.evidence_planner import EvidencePlanner
 from zonegate.agent.gemini import GeminiClient
 from zonegate.agent.ollama import OllamaClient
+from zonegate.api.actors import ActorsController
 from zonegate.api.authorization import AuthorizationController
 from zonegate.api.health import health_check
+from zonegate.api.policy import PolicyController
 from zonegate.api.receipts import ReceiptsController
 from zonegate.authorization.service import AuthorizationService
 from zonegate.authorization.token import TokenService
@@ -58,6 +61,7 @@ def create_app(settings: Settings | None = None) -> Litestar:
             llm_client = OllamaClient(
                 base_url=cfg.OLLAMA_BASE_URL,
                 model=cfg.OLLAMA_MODEL,
+                timeout=cfg.OLLAMA_TIMEOUT,
             )
             logger.info("Using Ollama AI provider at '%s'", cfg.OLLAMA_BASE_URL)
 
@@ -77,7 +81,8 @@ def create_app(settings: Settings | None = None) -> Litestar:
 
         gateway = EvidenceGateway(nokia_client=nokia_client)
         plan_validator = EvidencePlanValidator()
-        policy_engine = PolicyEngine()
+        stored_policy = await store.get_policy_config()
+        policy_engine = PolicyEngine(config=stored_policy)
         token_service = TokenService()
         planner = EvidencePlanner(llm_client=llm_client)
         evaluator = ContextEvaluator(llm_client=llm_client, mcp_client=nokia_mcp_client)
@@ -106,6 +111,13 @@ def create_app(settings: Settings | None = None) -> Litestar:
             store.close()
             logger.info("ZoneGate storage closed cleanly")
 
+    # The operations dashboard is a separate origin during development.
+    cors_config = CORSConfig(
+        allow_origins=[origin.strip() for origin in cfg.CORS_ALLOW_ORIGINS.split(",") if origin.strip()],
+        allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+        allow_headers=["Content-Type"],
+    )
+
     logging_config = LoggingConfig(
         loggers={
             "zonegate": {
@@ -116,7 +128,14 @@ def create_app(settings: Settings | None = None) -> Litestar:
     )
 
     return Litestar(
-        route_handlers=[health_check, AuthorizationController, ReceiptsController],
+        route_handlers=[
+            health_check,
+            ActorsController,
+            AuthorizationController,
+            PolicyController,
+            ReceiptsController,
+        ],
+        cors_config=cors_config,
         dependencies={
             "store": Provide(provide_store, sync_to_thread=False),
             "llm_client": Provide(provide_llm, sync_to_thread=False),
