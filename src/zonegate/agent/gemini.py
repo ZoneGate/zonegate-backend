@@ -10,6 +10,50 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 
+# Keys Pydantic emits that the Gemini `response_schema` (OpenAPI 3.0 subset) rejects.
+# `additionalProperties` in particular is produced by every model using
+# `ConfigDict(extra="forbid")` and makes the API reject the request outright.
+_UNSUPPORTED_SCHEMA_KEYS = frozenset({"additionalProperties", "title", "$schema", "default", "examples"})
+
+
+def to_gemini_schema(model: Type[BaseModel]) -> dict:
+    """Converts a Pydantic model's JSON schema into the subset Gemini accepts.
+
+    Inlines `$ref`/`$defs`, drops unsupported keywords, and rewrites `Optional[X]`
+    unions (`anyOf` with a null branch) into a `nullable` field.
+    """
+    root = model.model_json_schema()
+    defs = root.pop("$defs", {})
+
+    def walk(node):
+        if isinstance(node, list):
+            return [walk(n) for n in node]
+        if not isinstance(node, dict):
+            return node
+
+        if "$ref" in node:
+            name = node["$ref"].rsplit("/", 1)[-1]
+            overrides = {k: v for k, v in node.items() if k != "$ref"}
+            return walk({**defs.get(name, {}), **overrides})
+
+        if "anyOf" in node:
+            variants = [v for v in node["anyOf"] if v.get("type") != "null"]
+            nullable = len(variants) != len(node["anyOf"])
+            rest = {k: v for k, v in node.items() if k != "anyOf" and k not in _UNSUPPORTED_SCHEMA_KEYS}
+            if len(variants) == 1:
+                resolved = walk({**variants[0], **rest})
+            else:
+                resolved = {k: walk(v) for k, v in rest.items()}
+                resolved["anyOf"] = [walk(v) for v in variants]
+            if nullable:
+                resolved["nullable"] = True
+            return resolved
+
+        return {k: walk(v) for k, v in node.items() if k not in _UNSUPPORTED_SCHEMA_KEYS}
+
+    return walk(root)
+
+
 class GeminiClientError(Exception):
     """Base exception for Gemini interactions."""
 
@@ -22,7 +66,7 @@ class GeminiClient:
     def __init__(
         self,
         api_key: str,
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3.6-flash",
     ) -> None:
         self.api_key = api_key
         self.model = model
@@ -50,7 +94,7 @@ class GeminiClient:
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             response_mime_type="application/json",
-            response_schema=response_model,
+            response_schema=to_gemini_schema(response_model),
         )
 
         try:
@@ -59,7 +103,7 @@ class GeminiClient:
                 contents=prompt,
                 config=config,
             )
-            if response.parsed and isinstance(response.parsed, response_model):
+            if isinstance(response.parsed, response_model):
                 return response.parsed
             if response.text:
                 return response_model.model_validate_json(response.text)
