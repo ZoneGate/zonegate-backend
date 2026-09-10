@@ -5,7 +5,7 @@ description = "Network-attested authorization system for critical human actions"
 readme = "README.md"
 requires-python = "==3.14.*"
 dependencies = [
-    "zova==1.0.0rc3",
+    "zova==1.0.0",
     "litestar>=2.24.0",
     "pydantic>=2.10.0",
     "langgraph>=1.2.0",

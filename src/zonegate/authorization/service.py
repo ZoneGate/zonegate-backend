@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import logging
+import uuid
 from zonegate.agent.context_evaluator import ContextEvaluator
 from zonegate.agent.evidence_planner import EvidencePlanner
 from zonegate.agent.graph import build_context_evaluation_graph, build_evidence_planning_graph
@@ -34,7 +35,7 @@ class AuthorizationService:
     7. Canonical evidence normalization
     8. AI Context Evaluation (advisory)
     9. Deterministic Policy Engine evaluation (authoritative)
-    10. State & receipt persistence in Zova 1.0.0-rc.3
+    10. State & receipt persistence in Zova 1.0.0
     11. Scoped token generation (on APPROVE only)
     """
 
@@ -84,8 +85,9 @@ class AuthorizationService:
         actor = await self.store.get_actor(transaction.actor_id)
         if not actor:
             logger.warning("Actor '%s' not registered", transaction.actor_id)
+            decision_id = f"dec_{uuid.uuid4().hex[:12]}"
             decision = PolicyDecision(
-                decision_id=f"dec_denied_{transaction.transaction_id}",
+                decision_id=decision_id,
                 transaction_id=transaction.transaction_id,
                 decision=DecisionOutcome.DENY,
                 reasons=[f"Actor '{transaction.actor_id}' is not enrolled in ZoneGate"],
@@ -108,8 +110,9 @@ class AuthorizationService:
         binding = await self.store.get_device_binding(transaction.actor_id)
         if not binding:
             logger.warning("No active device binding for actor '%s'", transaction.actor_id)
+            decision_id = f"dec_{uuid.uuid4().hex[:12]}"
             decision = PolicyDecision(
-                decision_id=f"dec_denied_{transaction.transaction_id}",
+                decision_id=decision_id,
                 transaction_id=transaction.transaction_id,
                 decision=DecisionOutcome.DENY,
                 reasons=[f"No verified device binding found for actor '{transaction.actor_id}'"],
@@ -130,7 +133,30 @@ class AuthorizationService:
 
         # 4. Resolve Workflow Evidence Policy
         workflow_name = transaction.action  # e.g., "RELEASE_CARGO"
-        policy = get_workflow_policy(workflow_name)
+        try:
+            policy = get_workflow_policy(workflow_name)
+        except ValueError as exc:
+            logger.warning("Unsupported action '%s' for tx=%s: %s", workflow_name, transaction.transaction_id, exc)
+            decision_id = f"dec_{uuid.uuid4().hex[:12]}"
+            decision = PolicyDecision(
+                decision_id=decision_id,
+                transaction_id=transaction.transaction_id,
+                decision=DecisionOutcome.DENY,
+                reasons=[f"Action '{workflow_name}' is not supported: {exc}"],
+                required_authority=None,
+                decided_at=now,
+            )
+            receipt = Receipt(
+                receipt_id=f"rcpt_{decision.decision_id}",
+                decision_id=decision.decision_id,
+                transaction_id=transaction.transaction_id,
+                decision=decision.decision,
+                issued_at=now,
+                token=None,
+            )
+            await self.store.save_decision(decision)
+            await self.store.save_receipt(receipt)
+            return decision, receipt
 
         # 5. AI Evidence Planning (Advisory via LangGraph)
         proposed_plan = None
@@ -153,8 +179,9 @@ class AuthorizationService:
             )
         except EvidencePlanValidationError as exc:
             logger.error("Evidence plan validation failed: %s", exc)
+            decision_id = f"dec_{uuid.uuid4().hex[:12]}"
             decision = PolicyDecision(
-                decision_id=f"dec_denied_{transaction.transaction_id}",
+                decision_id=decision_id,
                 transaction_id=transaction.transaction_id,
                 decision=DecisionOutcome.DENY,
                 reasons=[f"Evidence plan validation failed: {exc}"],
@@ -184,8 +211,9 @@ class AuthorizationService:
             )
         except ActorDeviceMismatchError as exc:
             logger.warning("Actor-device binding verification failed: %s", exc)
+            decision_id = f"dec_{uuid.uuid4().hex[:12]}"
             decision = PolicyDecision(
-                decision_id=f"dec_denied_{transaction.transaction_id}",
+                decision_id=decision_id,
                 transaction_id=transaction.transaction_id,
                 decision=DecisionOutcome.DENY,
                 reasons=[f"Device binding validation error: {exc}"],
@@ -204,8 +232,9 @@ class AuthorizationService:
             return decision, receipt
         except EvidenceGatewayError as exc:
             logger.error("Evidence gateway collection error: %s", exc)
+            decision_id = f"dec_{uuid.uuid4().hex[:12]}"
             decision = PolicyDecision(
-                decision_id=f"dec_denied_{transaction.transaction_id}",
+                decision_id=decision_id,
                 transaction_id=transaction.transaction_id,
                 decision=DecisionOutcome.DENY,
                 reasons=[f"Network evidence collection failed: {exc}"],
@@ -263,7 +292,8 @@ class AuthorizationService:
                 zone=transaction.zone,
                 decision_id=decision.decision_id,
             )
-            token_str = scoped_token.signature
+            token_str = scoped_token.token_id
+            await self.store.save_token(scoped_token)
 
         receipt = Receipt(
             receipt_id=f"rcpt_{decision.decision_id}",
@@ -285,3 +315,41 @@ class AuthorizationService:
             decision.reasons,
         )
         return decision, receipt
+
+    async def claim_token(
+        self,
+        token_identifier: str,
+        expected_action: str | None = None,
+        expected_resource_id: str | None = None,
+        expected_zone: str | None = None,
+        expected_actor_id: str | None = None,
+    ) -> tuple[bool, str, str, ScopedAuthorizationToken | None]:
+        """Claims a single-use authorization token, checking expiry, scope matching, and replay."""
+        token = await self.store.get_token(token_identifier)
+        if not token:
+            return False, "REJECTED_NOT_FOUND", f"Authorization token '{token_identifier}' not found in registry", None
+
+        claimed, status, message, updated_token = self.token_service.claim_token(
+            token=token,
+            expected_action=expected_action,
+            expected_resource_id=expected_resource_id,
+            expected_zone=expected_zone,
+            expected_actor_id=expected_actor_id,
+        )
+        if claimed:
+            await self.store.save_token(updated_token)
+            logger.info(
+                "Token '%s' claimed for action='%s', resource='%s'",
+                updated_token.token_id,
+                updated_token.action,
+                updated_token.resource_id,
+            )
+        else:
+            logger.warning(
+                "Token claim rejected for '%s': status=%s, reason=%s",
+                token_identifier,
+                status,
+                message,
+            )
+
+        return claimed, status, message, updated_token

@@ -3,6 +3,7 @@ import concurrent.futures
 from pathlib import Path
 from typing import Callable, TypeVar
 import zova
+from zonegate.authorization.token import ScopedAuthorizationToken
 from zonegate.domain.actors import Actor, DeviceBinding
 from zonegate.domain.decisions import ContextEvaluation, PolicyDecision
 from zonegate.domain.evidence import CanonicalEvidence, ValidatedEvidencePlan
@@ -13,10 +14,10 @@ T = TypeVar("T")
 
 
 class ZoneGateStore:
-    """Narrow ZoneGate-specific storage boundary backed strictly by Zova 1.0.0-rc.3.
+    """Narrow ZoneGate-specific storage boundary backed strictly by Zova 1.0.0.
 
     Translates between ZoneGate domain objects and Zova's native embedded storage.
-    Note on Zova 1.0.0-rc.3 Architecture:
+    Note on Zova 1.0.0 Architecture:
     `zova_python::database::PyDatabase` is unsendable across OS threads (!Send).
     ZoneGateStore pins all Database lifecycle and operations to a dedicated single-threaded
     worker, ensuring thread safety and preventing cross-thread drop panics.
@@ -32,6 +33,8 @@ class ZoneGateStore:
     NS_DECISION_TX_INDEX = b"decision_tx_index"
     NS_RECEIPTS = b"receipts"
     NS_RECEIPT_TX_INDEX = b"receipt_tx_index"
+    NS_TOKENS = b"tokens"
+    NS_TOKEN_SIG_INDEX = b"token_sig_index"
 
     def __init__(self, path_str: str) -> None:
         self._path_str = path_str
@@ -99,7 +102,13 @@ class ZoneGateStore:
     def _save_actor_sync(self, actor: Actor) -> None:
         assert self._db is not None
         raw = actor.model_dump_json().encode("utf-8")
-        self._db.kv_put(self.NS_ACTORS, actor.actor_id.encode("utf-8"), raw)
+        self._db.begin()
+        try:
+            self._db.kv_put(self.NS_ACTORS, actor.actor_id.encode("utf-8"), raw)
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
 
     async def save_actor(self, actor: Actor) -> None:
         await self._run(self._save_actor_sync, actor)
@@ -119,7 +128,13 @@ class ZoneGateStore:
     def _save_device_binding_sync(self, binding: DeviceBinding) -> None:
         assert self._db is not None
         raw = binding.model_dump_json().encode("utf-8")
-        self._db.kv_put(self.NS_BINDINGS, binding.actor_id.encode("utf-8"), raw)
+        self._db.begin()
+        try:
+            self._db.kv_put(self.NS_BINDINGS, binding.actor_id.encode("utf-8"), raw)
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
 
     async def save_device_binding(self, binding: DeviceBinding) -> None:
         await self._run(self._save_device_binding_sync, binding)
@@ -139,7 +154,13 @@ class ZoneGateStore:
     def _save_transaction_sync(self, tx: TransactionRequest) -> None:
         assert self._db is not None
         raw = tx.model_dump_json().encode("utf-8")
-        self._db.kv_put(self.NS_TRANSACTIONS, tx.transaction_id.encode("utf-8"), raw)
+        self._db.begin()
+        try:
+            self._db.kv_put(self.NS_TRANSACTIONS, tx.transaction_id.encode("utf-8"), raw)
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
 
     async def save_transaction(self, tx: TransactionRequest) -> None:
         await self._run(self._save_transaction_sync, tx)
@@ -159,7 +180,13 @@ class ZoneGateStore:
     def _save_evidence_plan_sync(self, transaction_id: str, plan: ValidatedEvidencePlan) -> None:
         assert self._db is not None
         raw = plan.model_dump_json().encode("utf-8")
-        self._db.kv_put(self.NS_PLANS, transaction_id.encode("utf-8"), raw)
+        self._db.begin()
+        try:
+            self._db.kv_put(self.NS_PLANS, transaction_id.encode("utf-8"), raw)
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
 
     async def save_evidence_plan(self, transaction_id: str, plan: ValidatedEvidencePlan) -> None:
         await self._run(self._save_evidence_plan_sync, transaction_id, plan)
@@ -179,7 +206,13 @@ class ZoneGateStore:
     def _save_evidence_sync(self, transaction_id: str, evidence: CanonicalEvidence) -> None:
         assert self._db is not None
         raw = evidence.model_dump_json().encode("utf-8")
-        self._db.kv_put(self.NS_EVIDENCE, transaction_id.encode("utf-8"), raw)
+        self._db.begin()
+        try:
+            self._db.kv_put(self.NS_EVIDENCE, transaction_id.encode("utf-8"), raw)
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
 
     async def save_evidence(self, transaction_id: str, evidence: CanonicalEvidence) -> None:
         await self._run(self._save_evidence_sync, transaction_id, evidence)
@@ -199,7 +232,13 @@ class ZoneGateStore:
     def _save_context_evaluation_sync(self, transaction_id: str, evaluation: ContextEvaluation) -> None:
         assert self._db is not None
         raw = evaluation.model_dump_json().encode("utf-8")
-        self._db.kv_put(self.NS_EVALUATIONS, transaction_id.encode("utf-8"), raw)
+        self._db.begin()
+        try:
+            self._db.kv_put(self.NS_EVALUATIONS, transaction_id.encode("utf-8"), raw)
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
 
     async def save_context_evaluation(self, transaction_id: str, evaluation: ContextEvaluation) -> None:
         await self._run(self._save_context_evaluation_sync, transaction_id, evaluation)
@@ -276,3 +315,39 @@ class ZoneGateStore:
 
     async def save_receipt(self, receipt: Receipt) -> None:
         await self._run(self._save_receipt_sync, receipt)
+
+    # --- Scoped Authorization Tokens ---
+
+    def _get_token_sync(self, token_identifier: str) -> ScopedAuthorizationToken | None:
+        assert self._db is not None
+        key_b = token_identifier.encode("utf-8")
+        raw = self._db.kv_get(self.NS_TOKENS, key_b)
+        if raw is None:
+            # Check secondary signature index
+            token_id_b = self._db.kv_get(self.NS_TOKEN_SIG_INDEX, key_b)
+            if token_id_b is not None:
+                raw = self._db.kv_get(self.NS_TOKENS, token_id_b)
+        if raw is None:
+            return None
+        return ScopedAuthorizationToken.model_validate_json(raw.decode("utf-8"))
+
+    async def get_token(self, token_identifier: str) -> ScopedAuthorizationToken | None:
+        return await self._run(self._get_token_sync, token_identifier)
+
+    def _save_token_sync(self, token: ScopedAuthorizationToken) -> None:
+        assert self._db is not None
+        raw = token.model_dump_json().encode("utf-8")
+        token_id_b = token.token_id.encode("utf-8")
+        sig_b = token.signature.encode("utf-8")
+
+        self._db.begin()
+        try:
+            self._db.kv_put(self.NS_TOKENS, token_id_b, raw)
+            self._db.kv_put(self.NS_TOKEN_SIG_INDEX, sig_b, token_id_b)
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
+
+    async def save_token(self, token: ScopedAuthorizationToken) -> None:
+        await self._run(self._save_token_sync, token)

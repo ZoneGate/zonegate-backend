@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # Zova Persistence
     ZOVA_DB_PATH: str = "data/zonegate.zova"
 
+    # Token Service Configuration
+    TOKEN_SECRET_KEY: str = "zonegate-token-secret-key-initial-scaffold"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

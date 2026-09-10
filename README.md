@@ -49,7 +49,7 @@ Scoped Authorization Token / Human Authority Transfer
 ## Strict Hard Requirements
 
 - **Python 3.14**: Explicitly pinned via `requires-python = "==3.14.*"`.
-- **Zova 1.0.0-rc.3**: Embedded records, objects, and persistence layer pinned to `zova = "1.0.0rc3"`.
+- **Zova 1.0.0**: Embedded records, objects, and persistence layer pinned to `zova = "1.0.0"` (officially supports Linux, macOS, and Windows via prebuilt `win_amd64` wheels).
 
 ---
 
@@ -84,8 +84,8 @@ Scoped Authorization Token / Human Authority Transfer
 - **Static Allowlist**: Enforces an explicit allowlist of permissible tools (`NOKIA_MCP_STATIC_ALLOWLIST`). An empty allowlist means all tools provided by the MCP server are eligible. Unlisted tools are blocked at the client boundary before invocation.
 - Used by the **Context Evaluation Agent** to query supplemental carrier facts during risk assessment.
 
-### Zova 1.0.0-rc.3 Storage Integration
-- Zova 1.0.0-rc.3 native embedded database (`Database.create`, `Database.open`, `Database.create_memory`) is used as the sole state and persistence engine.
+### Zova 1.0.0 Storage Integration
+- Zova 1.0.0 native embedded database (`Database.create`, `Database.open`, `Database.create_memory`) is used as the sole state and persistence engine.
 - Leverages Zova's partitioned byte namespaces (`actors`, `device_bindings`, `transactions`, `evidence_plans`, `evidence`, `context_evaluations`, `decisions`, `receipts`) with transactional commits/rollbacks.
 - **Thread Model Consideration**: Zova's PyO3 binding (`PyDatabase`) is thread-pinned (`!Send`). `ZoneGateStore` isolates database handle lifecycle and all execution inside a dedicated single-threaded worker executor, providing safe async execution across concurrent requests and event loops without thread assertion panics.
 

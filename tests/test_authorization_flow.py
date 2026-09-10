@@ -139,3 +139,10 @@ async def test_full_authorization_service_pipeline_and_zova_persistence(
     saved_receipt = await memory_store.get_receipt(receipt.receipt_id)
     assert saved_receipt is not None
     assert saved_receipt.token == receipt.token
+
+    # Verify scoped token is persisted in Zova registry
+    saved_token = await memory_store.get_token(receipt.token)
+    assert saved_token is not None
+    assert saved_token.action == standard_transaction.action
+    assert saved_token.resource_id == standard_transaction.resource_id
+    assert saved_token.claimed is False
