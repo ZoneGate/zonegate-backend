@@ -33,7 +33,7 @@ class OllamaClient:
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "llama3.2",
+        model: str = "qwen2.5:7b",
         timeout: float = 120.0,
         client: httpx.AsyncClient | None = None,
     ) -> None:

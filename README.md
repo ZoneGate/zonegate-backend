@@ -205,7 +205,7 @@ LLM_PROVIDER=ollama
 
 # Local Ollama Configuration (when LLM_PROVIDER=ollama)
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2
+OLLAMA_MODEL=qwen2.5:7b
 
 # Google Gemini Configuration (when LLM_PROVIDER=gemini)
 GEMINI_API_KEY=your-gemini-api-key-here
@@ -220,8 +220,11 @@ ZOVA_DB_PATH=data/zonegate.zova
 ### 4. Configuring AI Runtime (Ollama or Gemini)
 - **Local Ollama**: Start Ollama and run your model:
   ```bash
-  ollama run llama3.2
+  ollama pull qwen2.5:7b
   ```
+  `qwen2.5:7b` is the default: it asks for supplementary evidence where the
+  context calls for it and writes a full assessment. `llama3.2` also runs and
+  answers faster, but rarely asks for more than the mandatory baseline.
   Set `LLM_PROVIDER=ollama` in `.env`.
 - **Cloud Gemini**: Provide your Google AI API key:
   Set `LLM_PROVIDER=gemini` and `GEMINI_API_KEY=your-api-key` in `.env`.
