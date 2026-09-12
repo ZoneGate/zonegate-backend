@@ -252,6 +252,32 @@ class TestTheDecisionAdmitsWhatItRestsOn:
         assert decision.decision == DecisionOutcome.HOLD
         assert any(r.startswith("Caveat:") for r in decision.reasons)
 
+    def test_a_permission_denial_carries_no_caveat(self):
+        # The refusal is about the actor, not the network. A carrier caveat
+        # under it reads as though the carrier had a hand in the outcome.
+        stripped = actor().model_copy(update={"permissions": []})
+        decision = PolicyEngine().evaluate(
+            transaction=transaction(),
+            actor=stripped,
+            evidence=evidence(),
+            attestable=WITHOUT_NUMBER,
+        )
+
+        assert decision.decision == DecisionOutcome.DENY
+        assert decision.reasons == [decision.reasons[0]]
+        assert "permission" in decision.reasons[0]
+
+    def test_an_evidence_denial_keeps_the_caveat(self):
+        decision = PolicyEngine().evaluate(
+            transaction=transaction(),
+            actor=actor(),
+            evidence=evidence(location_verified=False),
+            attestable=WITHOUT_NUMBER,
+        )
+
+        assert decision.decision == DecisionOutcome.DENY
+        assert any(r.startswith("Caveat:") for r in decision.reasons)
+
     def test_a_full_carrier_adds_no_caveat(self):
         decision = PolicyEngine().evaluate(
             transaction=transaction(),

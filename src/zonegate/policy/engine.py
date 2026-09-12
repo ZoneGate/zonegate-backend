@@ -113,12 +113,17 @@ class PolicyEngine:
             decision: DecisionOutcome,
             reason: str,
             required_authority: str | None = None,
+            rests_on_evidence: bool = True,
         ) -> PolicyDecision:
+            # A caveat qualifies network evidence. A decision reached before
+            # any evidence mattered -- a permission denial -- has nothing for
+            # it to qualify, and attaching it there reads as though the
+            # carrier had a part in the refusal.
             return PolicyDecision(
                 decision_id=decision_id,
                 transaction_id=transaction.transaction_id,
                 decision=decision,
-                reasons=[reason, *caveats],
+                reasons=[reason, *caveats] if rests_on_evidence else [reason],
                 required_authority=required_authority,
                 context_evaluation=context_evaluation,
                 evidence_summary=evidence_summary,
@@ -133,6 +138,7 @@ class PolicyEngine:
             return outcome(
                 DecisionOutcome.DENY,
                 f"Actor lacks required permission '{required_perm}' for action '{transaction.action}'",
+                rests_on_evidence=False,
             )
 
         # Rule 2: the carrier contradicting the registered number -> DENY.
