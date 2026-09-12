@@ -59,7 +59,7 @@ services:
       - NOKIA_MCP_STATIC_ALLOWLIST=
       - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
       # A cold model load can take ~30s; the default has to clear that.
       - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-120}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}

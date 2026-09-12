@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     # Ollama Configuration
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "llama3.2"
+    OLLAMA_MODEL: str = "qwen2.5:7b"
     # A cold model load costs far more than a warm generation, so the
     # default has to survive the first request after Ollama starts.
     OLLAMA_TIMEOUT: float = 120.0
