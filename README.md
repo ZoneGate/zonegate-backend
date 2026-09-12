@@ -285,6 +285,15 @@ To decide on a real carrier instead of the mock:
 CARRIER_URL=https://your-carrier.example.com CARRIER_KEY=... docker compose up -d
 ```
 
+**Evaluating with your own Nokia key.** No key ships with the project. Live mode
+(`CARRIER_MODE=live`, the default) sends every carrier check to the Nokia
+Network as Code gateway using the key you provide, and refuses to start on an
+empty or placeholder key rather than quietly deciding on nothing:
+
+```bash
+CARRIER_KEY=<your RapidAPI key for network-as-code> docker compose up -d
+```
+
 ### Tests
 
 ```bash
@@ -308,10 +317,12 @@ preflight rejection, with nothing useful shown in the browser.
 
 ### 1. Enrol an actor
 
-The store starts empty, and an unenrolled actor is denied by design:
+An unenrolled actor is denied by design. Enrolment is a console action, so sign
+in as an authority first and send the session cookie with the request:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/actors -H 'Content-Type: application/json'   -d '{"actor":{"actor_id":"usr_cargo_operator_01","role":"ROLE_CARGO_OPERATOR","permissions":["cargo:release","cargo:inspect"],"registered_phone_number":"+14155550199","registered_device_id":"dev_imei_99887766","enrollment_status":"ACTIVE"}}'
+curl -c jar.txt -X POST http://127.0.0.1:8000/v1/auth/login -H 'Content-Type: application/json' -d '{"actor_id":"usr_cargo_supervisor_01","password":"zonegate-demo"}'
+curl -b jar.txt -X POST http://127.0.0.1:8000/v1/actors -H 'Content-Type: application/json'   -d '{"actor":{"actor_id":"usr_cargo_operator_02","role":"ROLE_CARGO_OPERATOR","permissions":["cargo:release","cargo:inspect"],"registered_phone_number":"+14155550199","registered_device_id":"dev_imei_99887766","enrollment_status":"ACTIVE"}}'
 ```
 
 There is also a seed script. Zova is an **embedded** database: if the API
@@ -389,18 +400,48 @@ Enforced invariants:
 ### Health
 - `GET /health`: Returns service health and reachability of dependencies (Zova, Ollama, Nokia).
 
+### Who uses which surface
+ZoneGate has two audiences. **Cargo personnel** (`CARGO_OPERATOR`) request
+releases from the mobile app. **Authorities** -- supervisors and officers --
+decide on the web console. The two never share a screen:
+
+- A cargo operator cannot sign in to the console, even with a correct password.
+  A session opened for one earlier stands for nobody.
+- Enrolment, permission edits, policy changes and hold resolution need a
+  signed-in console session (401 without one).
+- A hold can only be resolved by the role the engine handed it to: a
+  `ROLE_SECURITY_OFFICER` cannot settle a hold for `ROLE_CARGO_SUPERVISOR`
+  (403). The resolution is recorded under the signed-in actor, never a name
+  the client sends.
+- Roles compare without their `ROLE_` prefix, so `CARGO_OPERATOR` and
+  `ROLE_CARGO_OPERATOR` are the same job.
+
+Reading decisions stays open, because the mobile app reads them without a
+console session.
+
 ### Console sign-in
 The console is reachable only to somebody already on the enrolled roster; there
 is no registration endpoint and there will not be one. The session lives in an
 httpOnly cookie, so no page script can read it.
 
-- `POST /v1/auth/login`: Signs an enrolled actor in and sets the session cookie.
+- `POST /v1/auth/login`: Signs an enrolled authority in and sets the session cookie.
 - `GET /v1/auth/session`: The signed-in actor, or 401 when nobody is.
 - `POST /v1/auth/logout`: Revokes the session server-side and clears the cookie.
 - `POST /v1/auth/password`: Changes the signed-in actor's own console password.
 
-On a fresh database the auto-seeded demo operator gets `DEMO_OPERATOR_PASSWORD`
-(default `zonegate-demo`), so the sign-in screen is not a dead end.
+On a fresh database one console account is seeded for each authority the
+default policy escalates to, all with `DEMO_OPERATOR_PASSWORD` (default
+`zonegate-demo`):
+
+| Account | Role | Settles |
+|---|---|---|
+| `usr_cargo_supervisor_01` | `ROLE_CARGO_SUPERVISOR` | HIGH_VALUE cargo, releases outside working hours |
+| `usr_security_officer_01` | `ROLE_SECURITY_OFFICER` | WEAPONS, recent SIM swaps |
+| `usr_safety_officer_01` | `ROLE_SAFETY_OFFICER` | HAZARDOUS |
+| `usr_compliance_officer_01` | `ROLE_COMPLIANCE_OFFICER` | CONTROLLED_SUBSTANCE |
+
+The seeded field operator `usr_cargo_operator_01` has no console access; it
+signs in to the mobile app.
 
 ### Actors
 - `POST /v1/actors`: Enrolls an actor and binds their device. Required before any request can pass the gateway. An optional `password` also gives them console access.

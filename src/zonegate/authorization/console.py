@@ -11,6 +11,7 @@ import logging
 import secrets
 
 from zonegate.authorization.passwords import hash_password, verify_password
+from zonegate.authorization.roles import is_field_role
 from zonegate.domain.actors import Actor
 from zonegate.domain.credentials import ConsoleSession, OperatorCredential
 from zonegate.storage.zova import ZoneGateStore
@@ -27,6 +28,10 @@ class ConsoleAuthError(Exception):
 
 class InvalidCredentialsError(ConsoleAuthError):
     """Wrong actor id, wrong password, or an actor with no console access."""
+
+
+class ConsoleAccessDeniedError(InvalidCredentialsError):
+    """Correct credentials, but a role that works in the field, not on the console."""
 
 
 class WeakPasswordError(ConsoleAuthError):
@@ -83,6 +88,15 @@ class ConsoleAuthService:
                 f"Actor '{actor_id}' is '{actor.enrollment_status}' and cannot sign in"
             )
 
+        # Checked only after the password, so this message cannot be used to
+        # learn which ids on the roster are cargo personnel.
+        if is_field_role(actor.role):
+            logger.warning("Console sign-in refused: actor '%s' is field personnel", actor_id)
+            raise ConsoleAccessDeniedError(
+                "The console is for supervisors and officers. Cargo personnel "
+                "request releases from the ZoneGate mobile app."
+            )
+
         now = datetime.now(timezone.utc)
         session = ConsoleSession(
             session_id=secrets.token_urlsafe(32),
@@ -111,7 +125,12 @@ class ConsoleAuthService:
             await self.store.delete_console_session(session_id)
             return None
 
-        return await self.store.get_actor(session.actor_id)
+        actor = await self.store.get_actor(session.actor_id)
+        # A session opened before field roles were kept off the console, or
+        # for an actor whose role has since changed, stands for nobody.
+        if actor is None or is_field_role(actor.role):
+            return None
+        return actor
 
     async def sign_out(self, session_id: str | None) -> None:
         if session_id:

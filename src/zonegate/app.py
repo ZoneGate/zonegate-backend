@@ -35,6 +35,16 @@ from zonegate.storage.zova import ZoneGateStore
 logger = logging.getLogger("zonegate")
 
 
+
+# Console accounts seeded for a demo deployment: one per authority the default
+# policy escalates holds to. All share DEMO_OPERATOR_PASSWORD.
+DEMO_AUTHORITIES: tuple[tuple[str, str], ...] = (
+    ("usr_cargo_supervisor_01", "ROLE_CARGO_SUPERVISOR"),
+    ("usr_security_officer_01", "ROLE_SECURITY_OFFICER"),
+    ("usr_safety_officer_01", "ROLE_SAFETY_OFFICER"),
+    ("usr_compliance_officer_01", "ROLE_COMPLIANCE_OFFICER"),
+)
+
 def provide_store(state: State) -> ZoneGateStore:
     return state.store
 
@@ -170,20 +180,28 @@ def create_app(settings: Settings | None = None) -> Litestar:
             await store.save_device_binding(demo_binding)
             logger.info("Auto-seeded default demo actor 'usr_cargo_operator_01' into Zova storage")
 
-        # Checked separately from the actor above: a database that predates
-        # console sign-in already has the demo actor, so seeding the password
-        # only alongside a new actor would leave those deployments with a
-        # sign-in screen nobody can get past.
-        if (
-            cfg.APP_ENV != "test"
-            and cfg.DEMO_OPERATOR_PASSWORD
-            and await store.get_actor("usr_cargo_operator_01") is not None
-            and await store.get_credential("usr_cargo_operator_01") is None
-        ):
-            await console_auth.set_password(
-                "usr_cargo_operator_01", cfg.DEMO_OPERATOR_PASSWORD
-            )
-            logger.info("Seeded a console password for the demo operator")
+        # The console is for the people holds are escalated to; the cargo
+        # operator above cannot sign in to it. One demo account per authority
+        # the default policy names, so every kind of hold has somebody who can
+        # settle it. They work at a desk, so they get no device binding.
+        # Checked account by account: a database that predates any of them
+        # still gets the ones it is missing.
+        if cfg.APP_ENV != "test" and cfg.DEMO_OPERATOR_PASSWORD:
+            for index, (actor_id, role) in enumerate(DEMO_AUTHORITIES, start=2):
+                if await store.get_actor(actor_id) is None:
+                    await store.save_actor(
+                        Actor(
+                            actor_id=actor_id,
+                            role=role,
+                            permissions=["hold:resolve"],
+                            registered_phone_number=f"+9999999100{index}",
+                            registered_device_id="console_workstation",
+                            enrollment_status="ACTIVE",
+                        )
+                    )
+                if await store.get_credential(actor_id) is None:
+                    await console_auth.set_password(actor_id, cfg.DEMO_OPERATOR_PASSWORD)
+                    logger.info("Seeded demo console account '%s' (%s)", actor_id, role)
 
         try:
             yield

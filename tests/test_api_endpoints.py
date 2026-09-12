@@ -3,6 +3,8 @@ from decimal import Decimal
 import pytest
 from litestar.testing import AsyncTestClient
 from zonegate.app import create_app
+
+from conftest import sign_in_authority
 from zonegate.config import Settings
 from zonegate.domain.actors import Actor, DeviceBinding
 
@@ -81,6 +83,7 @@ async def test_actor_and_device_enrollment_api():
     app = create_app(test_settings)
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         # 1. Enroll Actor via POST /v1/actors with EnrollmentRequest
         actor_data = {
             "actor_id": "usr_custom_operator",
@@ -117,6 +120,7 @@ async def test_unsupported_action_returns_clean_deny_not_500():
     app = create_app(test_settings)
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         # Enroll actor first
         actor_data = {
             "actor_id": "usr_cargo_operator_01",

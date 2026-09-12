@@ -5,6 +5,7 @@ from zonegate.agent.context_evaluator import ContextEvaluator
 from zonegate.agent.evidence_planner import EvidencePlanner
 from zonegate.agent.graph import build_context_evaluation_graph, build_evidence_planning_graph
 from zonegate.authorization.progress import Stage, StageListener, StageStatus, make_emitter
+from zonegate.authorization.roles import holds_authority
 from zonegate.authorization.token import TokenService
 from zonegate.domain.decisions import (
     ContextEvaluation,
@@ -31,6 +32,10 @@ class AuthorizationServiceError(Exception):
 
 class DecisionNotFoundError(AuthorizationServiceError):
     """Raised when a referenced policy decision does not exist."""
+
+
+class HoldAuthorityError(AuthorizationServiceError):
+    """The person resolving a hold is not the role it was handed to."""
 
 
 class HoldResolutionError(AuthorizationServiceError):
@@ -86,6 +91,7 @@ class AuthorizationService:
         outcome: DecisionOutcome,
         resolved_by: str,
         note: str = "",
+        resolver_role: str | None = None,
     ) -> tuple[PolicyDecision, Receipt]:
         """Records the binding decision of the human authority a HOLD was handed to.
 
@@ -107,6 +113,17 @@ class AuthorizationService:
             raise HoldResolutionError(
                 f"Decision '{decision_id}' was already resolved as "
                 f"{decision.resolution.outcome} by {decision.resolution.resolved_by}"
+            )
+
+        # The engine names who a hold belongs to; nobody else may end it. The
+        # HTTP layer always passes the signed-in role. Callers inside the
+        # service boundary that pass none are trusted, as they always were.
+        if resolver_role is not None and not holds_authority(
+            resolver_role, decision.required_authority
+        ):
+            raise HoldAuthorityError(
+                f"Decision '{decision_id}' is held for {decision.required_authority}; "
+                f"a {resolver_role} cannot resolve it"
             )
 
         if outcome not in (DecisionOutcome.APPROVE, DecisionOutcome.DENY):

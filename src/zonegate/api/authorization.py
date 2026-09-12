@@ -3,16 +3,19 @@ import json
 import logging
 from typing import AsyncGenerator
 
-from litestar import Controller, get, post
+from litestar import Controller, Request, get, post
 from litestar.di import NamedDependency
-from litestar.exceptions import ClientException, NotFoundException
+from litestar.exceptions import ClientException, NotFoundException, PermissionDeniedException
 from litestar.params import FromPath, FromQuery
 from litestar.response import ServerSentEvent, ServerSentEventMessage
 from pydantic import BaseModel, ConfigDict, Field
 from zonegate.authorization.progress import StageEvent
+from zonegate.api.guards import require_console_actor
+from zonegate.authorization.console import ConsoleAuthService
 from zonegate.authorization.service import (
     AuthorizationService,
     DecisionNotFoundError,
+    HoldAuthorityError,
     HoldResolutionError,
 )
 from zonegate.domain.decisions import DecisionOutcome, PolicyDecision
@@ -33,7 +36,13 @@ class HoldResolutionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     outcome: DecisionOutcome = Field(..., description="Final human outcome: APPROVE or DENY")
-    resolved_by: str = Field(..., description="Identifier of the deciding human authority")
+    resolved_by: str | None = Field(
+        default=None,
+        description=(
+            "Ignored. The resolution is recorded under the signed-in console "
+            "user; accepted only so older clients keep working"
+        ),
+    )
     note: str = Field(default="", description="Justification recorded in the audit trail")
 
 
@@ -226,21 +235,29 @@ class AuthorizationController(Controller):
         self,
         decision_id: FromPath[str],
         data: HoldResolutionRequest,
+        request: Request,
         auth_service: NamedDependency[AuthorizationService],
+        console_auth: NamedDependency[ConsoleAuthService],
     ) -> AuthorizationResponse:
         """Records the final, binding human decision on a HOLD.
 
         Only a HOLD is eligible. A deterministic DENY cannot be overridden here.
+        Only the role the engine handed the hold to may resolve it, and the
+        record names whoever is signed in -- never a name the client supplied.
         """
+        resolver = await require_console_actor(request, console_auth)
         try:
             decision, receipt = await auth_service.resolve_hold(
                 decision_id=decision_id,
                 outcome=data.outcome,
-                resolved_by=data.resolved_by,
+                resolved_by=resolver.actor_id,
                 note=data.note,
+                resolver_role=resolver.role,
             )
         except DecisionNotFoundError as exc:
             raise NotFoundException(detail=str(exc)) from exc
+        except HoldAuthorityError as exc:
+            raise PermissionDeniedException(detail=str(exc)) from exc
         except HoldResolutionError as exc:
             raise ClientException(detail=str(exc), status_code=409) from exc
 

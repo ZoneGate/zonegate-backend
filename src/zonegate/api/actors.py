@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
-from litestar import Controller, get, post, put
+from litestar import Controller, Request, get, post, put
 from litestar.di import NamedDependency
 from litestar.exceptions import ClientException, NotFoundException
 from litestar.params import FromPath, FromQuery
 from pydantic import BaseModel, ConfigDict, Field
+from zonegate.api.guards import require_console_actor
 from zonegate.authorization.console import ConsoleAuthService, WeakPasswordError
 from zonegate.authorization.service import AuthorizationService
 from zonegate.domain.actors import Actor, DeviceBinding
@@ -91,6 +92,7 @@ class ActorsController(Controller):
     async def enroll_actor(
         self,
         data: EnrollmentRequest,
+        request: Request,
         auth_service: NamedDependency[AuthorizationService],
         console_auth: NamedDependency[ConsoleAuthService],
     ) -> EnrollmentResponse:
@@ -98,7 +100,9 @@ class ActorsController(Controller):
 
         Without this the authorization pipeline can only ever answer DENY, because
         every request is checked against an enrolled actor and an active binding.
+        Enrolment is a console action: only a signed-in authority may add people.
         """
+        await require_console_actor(request, console_auth)
         binding = DeviceBinding(
             actor_id=data.actor.actor_id,
             phone_number=data.actor.registered_phone_number,
@@ -123,7 +127,9 @@ class ActorsController(Controller):
         self,
         actor_id: FromPath[str],
         data: PermissionUpdateRequest,
+        request: Request,
         auth_service: NamedDependency[AuthorizationService],
+        console_auth: NamedDependency[ConsoleAuthService],
     ) -> Actor:
         """Replaces an enrolled actor's permissions.
 
@@ -131,6 +137,7 @@ class ActorsController(Controller):
         one console screen that can turn a DENY into an APPROVE. It only ever
         affects requests evaluated from here on.
         """
+        await require_console_actor(request, console_auth)
         actor = await auth_service.store.get_actor(actor_id)
         if not actor:
             raise NotFoundException(detail=f"Actor '{actor_id}' is not enrolled")

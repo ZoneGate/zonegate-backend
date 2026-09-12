@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from litestar.testing import AsyncTestClient
 
-from zonegate.app import create_app
+from zonegate.app import DEMO_AUTHORITIES, create_app
 from zonegate.authorization.console import (
     SESSION_COOKIE,
     ConsoleAuthService,
@@ -332,8 +332,8 @@ async def test_a_short_password_is_refused_over_http():
 
 
 @pytest.mark.asyncio
-async def test_the_demo_operator_is_seeded_with_a_usable_console_password():
-    """A fresh database with nobody who can sign in makes the console a dead end."""
+async def test_every_escalation_authority_is_seeded_with_a_usable_console_password():
+    """A fresh database with nobody who can settle a hold makes the console a dead end."""
     app = create_app(
         Settings(
             APP_ENV="development",
@@ -346,21 +346,46 @@ async def test_the_demo_operator_is_seeded_with_a_usable_console_password():
     )
 
     async with AsyncTestClient(app=app) as client:
+        for actor_id, role in DEMO_AUTHORITIES:
+            response = await client.post(
+                "/v1/auth/login",
+                json={"actor_id": actor_id, "password": "zonegate-demo"},
+            )
+            assert response.status_code == 200, actor_id
+            assert response.json()["actor"]["role"] == role
+
+
+@pytest.mark.asyncio
+async def test_the_seeded_cargo_operator_gets_no_console_access():
+    """The field operator requests from the app; the console is not theirs."""
+    app = create_app(
+        Settings(
+            APP_ENV="development",
+            ZOVA_DB_PATH=":memory:",
+            NOKIA_MCP_ENABLED=False,
+            LLM_PROVIDER="ollama",
+            OLLAMA_BASE_URL="http://127.0.0.1:59999",
+            DEMO_OPERATOR_PASSWORD="zonegate-demo",
+        )
+    )
+
+    async with AsyncTestClient(app=app) as client:
+        assert await app.state.store.get_actor("usr_cargo_operator_01") is not None
         response = await client.post(
             "/v1/auth/login",
             json={"actor_id": "usr_cargo_operator_01", "password": "zonegate-demo"},
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_a_database_that_predates_sign_in_still_gets_a_console_password(tmp_path):
-    """The demo actor is already there, so seeding both together would miss it.
+async def test_a_database_that_predates_the_authority_accounts_still_gets_them(tmp_path):
+    """A deployment that already has a supervisor on file, but no password for them.
 
-    Two startups against one file: the first writes the actor with console
-    sign-in switched off, standing in for a deployment that predates it; the
-    second must notice the actor has no credential and give it one.
+    Two startups against one file: the first stands in for an older
+    deployment -- seeding off, the supervisor enrolled by hand without a
+    credential. The second must notice and give that account its password.
     """
     db = str(tmp_path / "upgrade.zova")
 
@@ -376,14 +401,23 @@ async def test_a_database_that_predates_sign_in_still_gets_a_console_password(tm
 
     before = create_app(at(""))
     async with AsyncTestClient(app=before):
-        assert await before.state.store.get_actor("usr_cargo_operator_01") is not None
-        assert await before.state.store.get_credential("usr_cargo_operator_01") is None
+        await before.state.store.save_actor(
+            Actor(
+                actor_id="usr_cargo_supervisor_01",
+                role="ROLE_CARGO_SUPERVISOR",
+                permissions=["hold:resolve"],
+                registered_phone_number="+99999991002",
+                registered_device_id="console_workstation",
+                enrollment_status="ACTIVE",
+            )
+        )
+        assert await before.state.store.get_credential("usr_cargo_supervisor_01") is None
 
     after = create_app(at("zonegate-demo"))
     async with AsyncTestClient(app=after) as client:
         response = await client.post(
             "/v1/auth/login",
-            json={"actor_id": "usr_cargo_operator_01", "password": "zonegate-demo"},
+            json={"actor_id": "usr_cargo_supervisor_01", "password": "zonegate-demo"},
         )
 
         assert response.status_code == 200
@@ -391,7 +425,7 @@ async def test_a_database_that_predates_sign_in_still_gets_a_console_password(tm
 
 @pytest.mark.asyncio
 async def test_seeding_never_overwrites_a_password_somebody_already_set(tmp_path):
-    """A restart must not silently reset the demo operator to the default."""
+    """A restart must not silently reset a demo authority to the default."""
     db = str(tmp_path / "kept.zova")
 
     def at() -> Settings:
@@ -408,7 +442,7 @@ async def test_seeding_never_overwrites_a_password_somebody_already_set(tmp_path
     async with AsyncTestClient(app=first) as client:
         await client.post(
             "/v1/auth/login",
-            json={"actor_id": "usr_cargo_operator_01", "password": "zonegate-demo"},
+            json={"actor_id": "usr_cargo_supervisor_01", "password": "zonegate-demo"},
         )
         await client.post("/v1/auth/password", json={"password": "chosen-by-a-person"})
 
@@ -417,12 +451,12 @@ async def test_seeding_never_overwrites_a_password_somebody_already_set(tmp_path
         assert (
             await client.post(
                 "/v1/auth/login",
-                json={"actor_id": "usr_cargo_operator_01", "password": "zonegate-demo"},
+                json={"actor_id": "usr_cargo_supervisor_01", "password": "zonegate-demo"},
             )
         ).status_code == 401
         assert (
             await client.post(
                 "/v1/auth/login",
-                json={"actor_id": "usr_cargo_operator_01", "password": "chosen-by-a-person"},
+                json={"actor_id": "usr_cargo_supervisor_01", "password": "chosen-by-a-person"},
             )
         ).status_code == 200

@@ -15,7 +15,7 @@ from zonegate.app import create_app
 from zonegate.config import Settings
 from zonegate.domain.actors import Actor, DeviceBinding
 
-from conftest import FakeNokiaClient, install_fake_nokia
+from conftest import FakeNokiaClient, install_fake_nokia, sign_in_authority
 
 
 def settings() -> Settings:
@@ -107,6 +107,7 @@ async def test_enrolling_an_actor_returns_the_binding_it_created():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         response = await client.post(
             "/v1/actors",
             json={
@@ -132,6 +133,7 @@ async def test_enrolment_can_bind_a_device_other_than_the_registered_one():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         body = (
             await client.post(
                 "/v1/actors",
@@ -192,6 +194,7 @@ async def test_enrolment_rejects_unknown_fields():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         response = await client.post(
             "/v1/actors",
             json={
@@ -320,6 +323,7 @@ async def test_pending_filter_excludes_a_hold_once_it_is_resolved():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         carrier(app)
         await enrol(app.state.store)
 
@@ -468,6 +472,7 @@ async def test_resolving_a_hold_over_http_returns_the_updated_record():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         carrier(app)
         await enrol(app.state.store)
 
@@ -499,6 +504,7 @@ async def test_resolving_a_deny_over_http_is_a_409():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         carrier(app)
         await enrol(app.state.store)
 
@@ -523,6 +529,7 @@ async def test_resolving_an_unknown_decision_over_http_is_a_404():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         response = await client.post(
             "/v1/authorizations/dec_missing/resolve",
             json={"outcome": "APPROVE", "resolved_by": "usr_cargo_supervisor_02"},
@@ -536,6 +543,7 @@ async def test_resolution_rejects_an_unknown_outcome():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         carrier(app)
         await enrol(app.state.store)
 
@@ -564,6 +572,7 @@ async def test_policy_config_rejects_an_hour_outside_the_clock():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         response = await client.put(
             "/v1/policy/config",
             json={
@@ -582,6 +591,7 @@ async def test_policy_config_rejects_a_restricted_category_with_no_authority():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         response = await client.put(
             "/v1/policy/config",
             json={
@@ -600,6 +610,7 @@ async def test_a_saved_category_map_changes_the_next_decision_over_http():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         carrier(app)
         await enrol(app.state.store)
 
@@ -637,6 +648,7 @@ async def test_retuning_policy_does_not_rewrite_decisions_already_recorded():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         carrier(app)
         await enrol(app.state.store)
 
