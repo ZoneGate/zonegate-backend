@@ -355,6 +355,7 @@ On a fresh database the auto-seeded demo operator gets `DEMO_OPERATOR_PASSWORD`
 
 ### Authorizations
 - `POST /v1/authorizations`: Evaluates a transaction request through the full authorization pipeline. Returns the authoritative `PolicyDecision` and an audit `Receipt`.
+- `POST /v1/authorizations/stream`: The same pipeline, reported as it runs. Server-sent events: a `stage` event at each of the six steps (IDENTITY, PLAN, VALIDATE, EVIDENCE, CONTEXT, POLICY) and a closing `result` event carrying exactly the payload the plain endpoint returns. A stage that is skipped says so; the stage that refused a request is the one marked FAILED.
 - `GET /v1/authorizations`: Lists decisions newest first. Supports `?decision=HOLD`, `?pending=true` and `?limit=`.
 - `GET /v1/authorizations/{decision_id}`: Retrieves an existing policy decision record from Zova.
 - `GET /v1/authorizations/{decision_id}/context`: Returns the decision together with the transaction, canonical evidence, evidence plan and receipt behind it.

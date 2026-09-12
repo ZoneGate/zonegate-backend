@@ -4,6 +4,7 @@ import uuid
 from zonegate.agent.context_evaluator import ContextEvaluator
 from zonegate.agent.evidence_planner import EvidencePlanner
 from zonegate.agent.graph import build_context_evaluation_graph, build_evidence_planning_graph
+from zonegate.authorization.progress import Stage, StageListener, StageStatus, make_emitter
 from zonegate.authorization.token import TokenService
 from zonegate.domain.decisions import (
     ContextEvaluation,
@@ -171,7 +172,15 @@ class AuthorizationService:
     async def authorize_transaction(
         self,
         transaction: TransactionRequest,
+        listener: StageListener | None = None,
     ) -> tuple[PolicyDecision, Receipt]:
+        """Runs the pipeline. With a `listener`, reports each stage as it happens.
+
+        The listener changes nothing about the decision: it is told what the
+        pipeline is doing, never asked. A caller that passes none pays nothing
+        for progress reporting.
+        """
+        emit = make_emitter(listener)
         now = datetime.now(timezone.utc)
         logger.info(
             "Starting authorization pipeline for transaction=%s, actor=%s, action=%s, value=%s",
@@ -183,11 +192,17 @@ class AuthorizationService:
 
         # 1. Save transaction in Zova
         await self.store.save_transaction(transaction)
+        await emit(Stage.IDENTITY, StageStatus.STARTED)
 
         # 2. Load Actor
         actor = await self.store.get_actor(transaction.actor_id)
         if not actor:
             logger.warning("Actor '%s' not registered", transaction.actor_id)
+            await emit(
+                Stage.IDENTITY,
+                StageStatus.FAILED,
+                f"'{transaction.actor_id}' is not on the enrolled roster",
+            )
             decision_id = f"dec_{uuid.uuid4().hex[:12]}"
             decision = PolicyDecision(
                 decision_id=decision_id,
@@ -213,6 +228,11 @@ class AuthorizationService:
         binding = await self.store.get_device_binding(transaction.actor_id)
         if not binding:
             logger.warning("No active device binding for actor '%s'", transaction.actor_id)
+            await emit(
+                Stage.IDENTITY,
+                StageStatus.FAILED,
+                f"'{transaction.actor_id}' has no active device binding",
+            )
             decision_id = f"dec_{uuid.uuid4().hex[:12]}"
             decision = PolicyDecision(
                 decision_id=decision_id,
@@ -234,12 +254,23 @@ class AuthorizationService:
             await self.store.save_receipt(receipt)
             return decision, receipt
 
+        await emit(
+            Stage.IDENTITY,
+            StageStatus.DONE,
+            f"{actor.actor_id} is bound to device {binding.device_id}",
+        )
+
         # 4. Resolve Workflow Evidence Policy
         workflow_name = transaction.action  # e.g., "RELEASE_CARGO"
         try:
             policy = get_workflow_policy(workflow_name)
         except ValueError as exc:
             logger.warning("Unsupported action '%s' for tx=%s: %s", workflow_name, transaction.transaction_id, exc)
+            await emit(
+                Stage.VALIDATE,
+                StageStatus.FAILED,
+                f"No evidence policy exists for action '{workflow_name}'",
+            )
             decision_id = f"dec_{uuid.uuid4().hex[:12]}"
             decision = PolicyDecision(
                 decision_id=decision_id,
@@ -264,6 +295,7 @@ class AuthorizationService:
         # 5. AI Evidence Planning (Advisory via LangGraph)
         proposed_plan = None
         if self._planning_graph:
+            await emit(Stage.PLAN, StageStatus.STARTED)
             try:
                 state = await self._planning_graph.ainvoke({
                     "transaction": transaction,
@@ -274,7 +306,25 @@ class AuthorizationService:
             except Exception as exc:
                 logger.warning("AI evidence planning failed safely, falling back to mandatory baseline: %s", exc)
 
+            if proposed_plan is None:
+                # Never fatal: the mandatory baseline stands on its own.
+                await emit(
+                    Stage.PLAN,
+                    StageStatus.SKIPPED,
+                    "No plan returned; the mandatory baseline is collected regardless",
+                )
+            else:
+                asked = ", ".join(kind.value for kind in proposed_plan.optional_evidence)
+                await emit(
+                    Stage.PLAN,
+                    StageStatus.DONE,
+                    f"Agent asked for {asked}" if asked else "Agent asked for nothing extra",
+                )
+        else:
+            await emit(Stage.PLAN, StageStatus.SKIPPED, "No planning agent is attached")
+
         # 6. Validate Evidence Plan
+        await emit(Stage.VALIDATE, StageStatus.STARTED)
         try:
             validated_plan: ValidatedEvidencePlan = self.validator.validate(
                 workflow_name=workflow_name,
@@ -282,6 +332,7 @@ class AuthorizationService:
             )
         except EvidencePlanValidationError as exc:
             logger.error("Evidence plan validation failed: %s", exc)
+            await emit(Stage.VALIDATE, StageStatus.FAILED, str(exc))
             decision_id = f"dec_{uuid.uuid4().hex[:12]}"
             decision = PolicyDecision(
                 decision_id=decision_id,
@@ -303,8 +354,16 @@ class AuthorizationService:
             return decision, receipt
 
         await self.store.save_evidence_plan(transaction.transaction_id, validated_plan)
+        collecting = ", ".join(kind.value for kind in validated_plan.combined)
+        await emit(
+            Stage.VALIDATE,
+            StageStatus.DONE,
+            f"{len(validated_plan.mandatory)} mandatory enforced, "
+            f"{len(validated_plan.optional)} optional accepted",
+        )
 
         # 7 & 8. Collect Permitted Nokia/CAMARA Evidence through Gateway & Normalize
+        await emit(Stage.EVIDENCE, StageStatus.STARTED, collecting)
         try:
             canonical_evidence: CanonicalEvidence = await self.gateway.collect_evidence(
                 actor=actor,
@@ -314,6 +373,7 @@ class AuthorizationService:
             )
         except ActorDeviceMismatchError as exc:
             logger.warning("Actor-device binding verification failed: %s", exc)
+            await emit(Stage.EVIDENCE, StageStatus.FAILED, str(exc))
             decision_id = f"dec_{uuid.uuid4().hex[:12]}"
             decision = PolicyDecision(
                 decision_id=decision_id,
@@ -335,6 +395,7 @@ class AuthorizationService:
             return decision, receipt
         except EvidenceGatewayError as exc:
             logger.error("Evidence gateway collection error: %s", exc)
+            await emit(Stage.EVIDENCE, StageStatus.FAILED, str(exc))
             decision_id = f"dec_{uuid.uuid4().hex[:12]}"
             decision = PolicyDecision(
                 decision_id=decision_id,
@@ -356,10 +417,16 @@ class AuthorizationService:
             return decision, receipt
 
         await self.store.save_evidence(transaction.transaction_id, canonical_evidence)
+        await emit(
+            Stage.EVIDENCE,
+            StageStatus.DONE,
+            f"Carrier answered for {collecting}" if collecting else "Nothing was collected",
+        )
 
         # 9. AI Context Evaluation (Advisory via LangGraph)
         context_evaluation: ContextEvaluation | None = None
         if self._context_graph:
+            await emit(Stage.CONTEXT, StageStatus.STARTED)
             try:
                 eval_state = await self._context_graph.ainvoke({
                     "transaction": transaction,
@@ -376,13 +443,27 @@ class AuthorizationService:
 
         if context_evaluation:
             await self.store.save_context_evaluation(transaction.transaction_id, context_evaluation)
+            await emit(
+                Stage.CONTEXT,
+                StageStatus.DONE,
+                f"Advises {context_evaluation.recommended_control} — advisory only, never binding",
+            )
+        else:
+            await emit(Stage.CONTEXT, StageStatus.SKIPPED, "No evaluating agent is attached")
 
         # 10. Deterministic Policy Engine Evaluation (LLM-free authoritative decision)
+        await emit(Stage.POLICY, StageStatus.STARTED)
         decision: PolicyDecision = self.policy_engine.evaluate(
             transaction=transaction,
             actor=actor,
             evidence=canonical_evidence,
             context_evaluation=context_evaluation,
+        )
+
+        await emit(
+            Stage.POLICY,
+            StageStatus.DONE,
+            decision.reasons[0] if decision.reasons else decision.decision.value,
         )
 
         # 11. Scoped token issuance only on APPROVE
