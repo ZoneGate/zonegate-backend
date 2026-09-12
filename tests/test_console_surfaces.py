@@ -16,7 +16,7 @@ from zonegate.config import Settings
 from zonegate.domain.actors import Actor, DeviceBinding
 from zonegate.evidence.gateway import DEFAULT_ZONE_REGISTRY
 
-from conftest import FakeNokiaClient, install_fake_nokia
+from conftest import FakeNokiaClient, install_fake_nokia, sign_in_authority
 
 
 def settings() -> Settings:
@@ -62,6 +62,7 @@ async def test_permissions_can_be_replaced_and_are_read_back():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         await enrol(app.state.store)
 
         response = await client.put(
@@ -85,6 +86,7 @@ async def test_a_permission_change_is_refused_when_the_stored_set_moved_on():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         await enrol(app.state.store)
 
         response = await client.put(
@@ -106,6 +108,7 @@ async def test_removing_the_release_permission_turns_the_next_request_into_a_den
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         install_fake_nokia(app, FakeNokiaClient())
         await enrol(app.state.store)
 
@@ -139,6 +142,7 @@ async def test_permissions_are_deduplicated_and_blanks_dropped():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         await enrol(app.state.store)
 
         response = await client.put(
@@ -157,6 +161,7 @@ async def test_editing_permissions_of_an_actor_who_is_not_enrolled_is_404():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         response = await client.put(
             "/v1/actors/usr_ghost/permissions",
             json={"permissions": ["cargo:release"], "expected_permissions": []},
@@ -175,6 +180,7 @@ async def test_an_employee_enrolled_with_a_password_can_sign_in_immediately():
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         enrolled = await client.post(
             "/v1/actors",
             json={
@@ -204,6 +210,7 @@ async def test_an_employee_enrolled_without_a_password_is_still_bound_for_the_pi
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         response = await client.post(
             "/v1/actors",
             json={
@@ -252,6 +259,7 @@ async def test_a_category_configured_outside_the_built_in_vocabulary_is_still_li
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         await client.put(
             "/v1/policy/config",
             json={

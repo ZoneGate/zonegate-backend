@@ -1,6 +1,8 @@
-from litestar import Controller, get, put
+from litestar import Controller, Request, get, put
 from litestar.di import NamedDependency
 from pydantic import BaseModel, ConfigDict, Field
+from zonegate.api.guards import require_console_actor
+from zonegate.authorization.console import ConsoleAuthService
 from zonegate.authorization.service import AuthorizationService
 from zonegate.domain.policy_config import CARGO_CATEGORIES, PolicyConfig
 
@@ -87,13 +89,16 @@ class PolicyController(Controller):
     async def update_config(
         self,
         data: PolicyConfig,
+        request: Request,
         auth_service: NamedDependency[AuthorizationService],
+        console_auth: NamedDependency[ConsoleAuthService],
     ) -> PolicyConfig:
         """Persists new thresholds and applies them to the running engine.
 
         Decisions already recorded keep the reasons they were given; this only
-        affects transactions evaluated from here on.
+        affects transactions evaluated from here on. A signed-in authority only.
         """
+        await require_console_actor(request, console_auth)
         await auth_service.store.save_policy_config(data)
         auth_service.policy_engine.config = data
         return data

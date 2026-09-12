@@ -140,3 +140,34 @@ def install_fake_nokia(app, nokia_client) -> None:
     while every carrier call fails.
     """
     app.state.gateway._nokia_client = nokia_client
+
+
+async def sign_in_authority(
+    client,
+    store,
+    role: str = "ROLE_CARGO_SUPERVISOR",
+    actor_id: str | None = None,
+    password: str = "console-test-pass",
+) -> str:
+    """Enrols a console authority and signs the test client in as them.
+
+    Enrolment, permission edits, policy changes and hold resolution all need a
+    console session now; the client keeps the cookie for the rest of the test.
+    """
+    from zonegate.authorization.console import ConsoleAuthService
+
+    actor_id = actor_id or f"usr_{role.lower().removeprefix('role_')}_test"
+    await store.save_actor(
+        Actor(
+            actor_id=actor_id,
+            role=role,
+            permissions=["hold:resolve"],
+            registered_phone_number="+14155550100",
+            registered_device_id="console_workstation",
+            enrollment_status="ACTIVE",
+        )
+    )
+    await ConsoleAuthService(store).set_password(actor_id, password)
+    response = await client.post("/v1/auth/login", json={"actor_id": actor_id, "password": password})
+    assert response.status_code == 200, response.text
+    return actor_id

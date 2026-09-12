@@ -7,6 +7,8 @@ from zonegate.config import Settings
 from zonegate.domain.actors import Actor, DeviceBinding
 from zonegate.domain.policy_config import PolicyConfig
 
+from conftest import sign_in_authority
+
 
 def _test_settings() -> Settings:
     """Settings that keep the app off the network and out of a real database."""
@@ -96,6 +98,7 @@ async def test_policy_config_round_trips_and_rebinds_the_engine():
     app = create_app(_test_settings())
 
     async with AsyncTestClient(app=app) as client:
+        await sign_in_authority(client, app.state.store)
         default = (await client.get("/v1/policy/config")).json()
         assert default["restricted_categories"]["WEAPONS"] == "ROLE_SECURITY_OFFICER"
 
