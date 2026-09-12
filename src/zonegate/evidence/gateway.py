@@ -18,9 +18,15 @@ class UnauthorizedEvidenceRequestError(EvidenceGatewayError):
 
 
 # Static geofence zones: zone_name -> (latitude, longitude, radius_meters)
+#
+# A zone that is not here falls back to DEFAULT_ZONE, which means the carrier
+# is asked about a different circle than the one named on the request. Any zone
+# the clients actually send therefore has to be listed, or the location check
+# quietly answers a question nobody asked.
 DEFAULT_ZONE_REGISTRY: dict[str, tuple[float, float, int]] = {
     "ZONE_CARGO_BAY_1": (37.7749, -122.4194, 500),
     "ZONE_PORT_TERMINAL_A": (37.7899, -122.4014, 1000),
+    "PORT_GATE_17": (37.7955, -122.3937, 400),
     "DEFAULT_ZONE": (37.7749, -122.4194, 1000),
 }
 
