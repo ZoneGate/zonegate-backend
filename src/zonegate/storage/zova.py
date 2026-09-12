@@ -1,9 +1,11 @@
 import asyncio
 import concurrent.futures
 import json
+import logging
 from pathlib import Path
 from typing import Callable, TypeVar
 import zova
+from pydantic import ValidationError
 from zonegate.authorization.token import ScopedAuthorizationToken
 from zonegate.domain.actors import Actor, DeviceBinding
 from zonegate.domain.credentials import ConsoleSession, OperatorCredential
@@ -12,6 +14,8 @@ from zonegate.domain.decisions import ContextEvaluation, PolicyDecision
 from zonegate.domain.evidence import CanonicalEvidence, ValidatedEvidencePlan
 from zonegate.domain.receipts import Receipt
 from zonegate.domain.transactions import TransactionRequest
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -265,7 +269,19 @@ class ZoneGateStore:
         raw = self._db.kv_get(self.NS_INDEXES, self.KEY_POLICY_CONFIG)
         if raw is None:
             return None
-        return PolicyConfig.model_validate_json(raw.decode("utf-8"))
+
+        try:
+            return PolicyConfig.model_validate_json(raw.decode("utf-8"))
+        except ValidationError:
+            # A database written before the restricted-category map replaced
+            # the value threshold. Refusing to start would strand every
+            # existing deployment; the engine falls back to its defaults and
+            # the console can save the shape it wants.
+            logger.warning(
+                "Stored policy configuration is not in the current shape and was "
+                "ignored; the engine is running on defaults until it is saved again"
+            )
+            return None
 
     async def get_policy_config(self) -> PolicyConfig | None:
         """Returns the stored thresholds, or None when never configured."""

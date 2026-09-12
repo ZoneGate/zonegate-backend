@@ -458,3 +458,17 @@ async def test_saving_policy_config_twice_keeps_only_the_latest(memory_store):
 
     assert reread is not None
     assert reread.restricted_categories == {"HIGH_VALUE": "ROLE_SECURITY_OFFICER"}
+
+
+@pytest.mark.asyncio
+async def test_a_policy_config_from_before_the_category_map_is_ignored_not_fatal(memory_store):
+    """An existing deployment must not be unable to start after the upgrade."""
+    memory_store._run_sync(
+        lambda: memory_store._db.kv_put(
+            memory_store.NS_INDEXES,
+            memory_store.KEY_POLICY_CONFIG,
+            b'{"high_value_threshold":"100000.00","window_start_hour":6,"window_end_hour":20}',
+        )
+    )
+
+    assert await memory_store.get_policy_config() is None
