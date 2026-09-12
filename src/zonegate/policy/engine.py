@@ -209,9 +209,20 @@ class PolicyEngine:
                 OFF_HOURS_AUTHORITY,
             )
 
-        # Rule 7: Otherwise -> APPROVE
+        # Rule 7: Otherwise -> APPROVE.
+        # The reason names the checks that actually passed rather than
+        # claiming "all verifications passed". Written the old way, an
+        # approval resting on one carrier answer still read as a full identity
+        # and geofence clearance, which is the kind of sentence somebody
+        # quotes in an incident review.
+        passed = [
+            EVIDENCE_LABELS[kind].lower()
+            for kind in sorted(mandatory, key=lambda k: k.value)
+            if kind in EVIDENCE_FIELDS
+        ]
+        checks = ", ".join(passed) if passed else "no network checks"
         return outcome(
             DecisionOutcome.APPROVE,
-            f"Category '{transaction.category}' is unrestricted and all network identity "
-            "and geofence verifications passed deterministic policy checks",
+            f"Category '{transaction.category}' is unrestricted and the required "
+            f"network evidence passed deterministic policy checks ({checks})",
         )
