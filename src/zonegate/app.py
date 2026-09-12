@@ -81,6 +81,16 @@ def create_app(settings: Settings | None = None) -> Litestar:
 
         nokia_client: NokiaClientProtocol
         if cfg.CARRIER_MODE.lower() == "live":
+            # Refuse to start rather than run on a placeholder. Without a real
+            # key every carrier call is rejected, every mandatory check comes
+            # back unanswered, and the console shows a wall of denials with no
+            # hint that the cause is a missing credential.
+            if not cfg.NOKIA_API_KEY or cfg.NOKIA_API_KEY in {"mock-key", "mock-nokia-api-key"}:
+                raise RuntimeError(
+                    "CARRIER_MODE=live needs a real Nokia Network as Code key in "
+                    "NOKIA_API_KEY. Set one, or use CARRIER_MODE=rest to run "
+                    "against the bundled mock carrier."
+                )
             nokia_client = NokiaLiveEvidenceClient(
                 api_key=cfg.NOKIA_API_KEY,
                 mcp_url=cfg.NOKIA_MCP_URL,
