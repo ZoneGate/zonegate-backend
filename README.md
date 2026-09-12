@@ -46,6 +46,33 @@ Scoped Authorization Token / Human Authority Transfer
 
 ---
 
+## Deterministic Policy Rules (RELEASE_CARGO)
+
+Evaluated in order; the first rule that fires decides. The agent's advisory
+assessment is attached to the record but never reaches this list.
+
+| # | Condition | Outcome | Authority |
+|---|---|---|---|
+| 1 | Actor lacks `cargo:release` | DENY | — |
+| 2 | Number verification is not `true` | DENY | — |
+| 3 | Location verification is `false` | DENY | — |
+| 4 | Recent SIM swap | HOLD | `ROLE_SECURITY_OFFICER` |
+| 5 | Cargo category is restricted | HOLD | the category's own role |
+| 6 | Outside the operational window | HOLD | `ROLE_CARGO_SUPERVISOR` |
+| 7 | Otherwise | APPROVE | — |
+
+Rule 5 replaced a single monetary threshold: what makes a release sensitive is
+what is in the container, not only what it is worth, and each kind of
+sensitivity answers to a different role. Which categories are restricted, and
+to whom, is configuration (`PUT /v1/policy/config`). Declared value is still
+recorded on every transaction for the audit trail; it no longer decides
+anything on its own.
+
+Rule 2 rejects `null` as well as `false`: evidence that was never collected is
+not evidence that passed.
+
+---
+
 ## Strict Hard Requirements
 
 - **Python 3.14**: Explicitly pinned via `requires-python = "==3.14.*"`.
@@ -301,9 +328,30 @@ Enforced invariants:
 ### Health
 - `GET /health`: Returns service health and reachability of dependencies (Zova, Ollama, Nokia).
 
+### Console sign-in
+The console is reachable only to somebody already on the enrolled roster; there
+is no registration endpoint and there will not be one. The session lives in an
+httpOnly cookie, so no page script can read it.
+
+- `POST /v1/auth/login`: Signs an enrolled actor in and sets the session cookie.
+- `GET /v1/auth/session`: The signed-in actor, or 401 when nobody is.
+- `POST /v1/auth/logout`: Revokes the session server-side and clears the cookie.
+- `POST /v1/auth/password`: Changes the signed-in actor's own console password.
+
+On a fresh database the auto-seeded demo operator gets `DEMO_OPERATOR_PASSWORD`
+(default `zonegate-demo`), so the sign-in screen is not a dead end.
+
 ### Actors
-- `POST /v1/actors`: Enrolls an actor and binds their device. Required before any request can pass the gateway.
+- `POST /v1/actors`: Enrolls an actor and binds their device. Required before any request can pass the gateway. An optional `password` also gives them console access.
+- `GET /v1/actors`: The enrolled roster with each actor's binding.
 - `GET /v1/actors/{actor_id}`: Retrieves an enrolled actor with their active device binding.
+- `PUT /v1/actors/{actor_id}/permissions`: Replaces an actor's permissions. `expected_permissions` is what the editor was showing; a mismatch is refused with 409 rather than overwriting a concurrent edit.
+
+### Policy
+- `GET /v1/policy/config`: The restricted-category map and operational window the engine is running with.
+- `PUT /v1/policy/config`: Saves both, and rebinds the running engine.
+- `GET /v1/policy/categories`: The cargo categories a request can carry, each marked with the authority it escalates to.
+- `GET /v1/policy/zones`: The geofences the evidence gateway verifies device location against — the same circles the console map draws.
 
 ### Authorizations
 - `POST /v1/authorizations`: Evaluates a transaction request through the full authorization pipeline. Returns the authoritative `PolicyDecision` and an audit `Receipt`.

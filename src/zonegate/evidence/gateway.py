@@ -49,6 +49,15 @@ class EvidenceGateway:
         self._nokia_client = nokia_client
         self._zone_registry = zone_registry or DEFAULT_ZONE_REGISTRY
 
+    @property
+    def zone_registry(self) -> dict[str, tuple[float, float, int]]:
+        """The geofences this gateway checks against, keyed by zone name.
+
+        Exposed so a console can draw the same circle the carrier was asked
+        about, rather than an illustration of one.
+        """
+        return dict(self._zone_registry)
+
     def validate_actor_device_binding(
         self,
         actor: Actor,

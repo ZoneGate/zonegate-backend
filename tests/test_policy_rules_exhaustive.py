@@ -33,6 +33,7 @@ def transaction(
     value: str = "15000.00",
     hour: int = 14,
     action: str = "RELEASE_CARGO",
+    category: str = "GENERAL",
 ) -> TransactionRequest:
     return TransactionRequest(
         transaction_id="tx_rule_test",
@@ -42,6 +43,7 @@ def transaction(
         zone="PORT_GATE_17",
         timestamp=datetime(2026, 9, 10, hour, 30, tzinfo=timezone.utc),
         value=Decimal(value),
+        category=category,
     )
 
 
@@ -169,50 +171,146 @@ def test_location_not_collected_does_not_deny_on_its_own():
 
 
 # ---------------------------------------------------------------------------
-# Rule 4 — high value outside the operational window
+# Rule 4 — a recent SIM swap
 # ---------------------------------------------------------------------------
 
 
-def test_high_value_outside_window_holds_for_the_cargo_supervisor():
+def test_sim_swap_holds_for_the_security_officer():
+    """A swapped SIM puts the line the evidence came over in doubt.
+
+    Nothing about the cargo makes that safe, so the swap holds on its own
+    rather than only in combination with what is being released.
+    """
     decision = PolicyEngine().evaluate(
-        transaction=transaction(value="250000.00", hour=3),
+        transaction=transaction(category="GENERAL", hour=14),
+        actor=actor(),
+        evidence=evidence(sim_swap=True),
+    )
+
+    assert decision.decision == DecisionOutcome.HOLD
+    assert decision.required_authority == "ROLE_SECURITY_OFFICER"
+
+
+def test_sim_swap_not_collected_does_not_hold():
+    """NOT COLLECTED is not the same as a clean line; it just cannot trip the rule."""
+    decision = PolicyEngine().evaluate(
+        transaction=transaction(),
+        actor=actor(),
+        evidence=evidence(sim_swap=None),
+    )
+
+    assert decision.decision == DecisionOutcome.APPROVE
+
+
+def test_sim_swap_outranks_the_category_hold():
+    """Both hold; the earlier rule decides which authority is named."""
+    decision = PolicyEngine().evaluate(
+        transaction=transaction(category="WEAPONS", hour=14),
+        actor=actor(),
+        evidence=evidence(sim_swap=True),
+    )
+
+    assert decision.decision == DecisionOutcome.HOLD
+    assert decision.required_authority == "ROLE_SECURITY_OFFICER"
+
+
+# ---------------------------------------------------------------------------
+# Rule 5 — restricted cargo categories
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "category,authority",
+    [
+        ("HIGH_VALUE", "ROLE_CARGO_SUPERVISOR"),
+        ("HAZARDOUS", "ROLE_SAFETY_OFFICER"),
+        ("CONTROLLED_SUBSTANCE", "ROLE_COMPLIANCE_OFFICER"),
+        ("WEAPONS", "ROLE_SECURITY_OFFICER"),
+    ],
+)
+def test_each_restricted_category_names_its_own_authority(category, authority):
+    decision = PolicyEngine().evaluate(
+        transaction=transaction(category=category, hour=14),
+        actor=actor(),
+        evidence=evidence(),
+    )
+
+    assert decision.decision == DecisionOutcome.HOLD
+    assert decision.required_authority == authority
+    assert category in decision.reasons[0]
+
+
+@pytest.mark.parametrize("category", ["GENERAL", "PERISHABLE"])
+def test_an_unrestricted_category_releases_on_clean_evidence(category):
+    decision = PolicyEngine().evaluate(
+        transaction=transaction(category=category, hour=14),
+        actor=actor(),
+        evidence=evidence(),
+    )
+
+    assert decision.decision == DecisionOutcome.APPROVE
+
+
+def test_declared_value_alone_no_longer_holds_anything():
+    """Value is recorded for the audit trail; the category is what escalates."""
+    decision = PolicyEngine().evaluate(
+        transaction=transaction(value="5000000.00", category="GENERAL", hour=14),
+        actor=actor(),
+        evidence=evidence(),
+    )
+
+    assert decision.decision == DecisionOutcome.APPROVE
+
+
+def test_a_category_removed_from_the_config_stops_being_restricted():
+    engine = PolicyEngine(
+        config=PolicyConfig(restricted_categories={"WEAPONS": "ROLE_SECURITY_OFFICER"})
+    )
+
+    decision = engine.evaluate(
+        transaction=transaction(category="HAZARDOUS", hour=14),
+        actor=actor(),
+        evidence=evidence(),
+    )
+
+    assert decision.decision == DecisionOutcome.APPROVE
+
+
+def test_a_category_added_to_the_config_starts_being_restricted():
+    engine = PolicyEngine(
+        config=PolicyConfig(restricted_categories={"PERISHABLE": "ROLE_COLD_CHAIN_LEAD"})
+    )
+
+    decision = engine.evaluate(
+        transaction=transaction(category="PERISHABLE", hour=14),
+        actor=actor(),
+        evidence=evidence(),
+    )
+
+    assert decision.decision == DecisionOutcome.HOLD
+    assert decision.required_authority == "ROLE_COLD_CHAIN_LEAD"
+
+
+def test_a_restricted_category_with_no_authority_is_rejected_as_configuration():
+    """A category nobody has to approve would release while looking restricted."""
+    with pytest.raises(ValueError):
+        PolicyConfig(restricted_categories={"WEAPONS": "  "})
+
+
+# ---------------------------------------------------------------------------
+# Rule 6 — the operational window
+# ---------------------------------------------------------------------------
+
+
+def test_outside_the_window_holds_for_the_cargo_supervisor():
+    decision = PolicyEngine().evaluate(
+        transaction=transaction(category="GENERAL", hour=3),
         actor=actor(),
         evidence=evidence(),
     )
 
     assert decision.decision == DecisionOutcome.HOLD
     assert decision.required_authority == "ROLE_CARGO_SUPERVISOR"
-
-
-def test_value_exactly_at_the_threshold_counts_as_high_value():
-    """The rule is `>=`, so the boundary itself must trip it."""
-    decision = PolicyEngine().evaluate(
-        transaction=transaction(value="100000.00", hour=3),
-        actor=actor(),
-        evidence=evidence(),
-    )
-
-    assert decision.decision == DecisionOutcome.HOLD
-
-
-def test_one_cent_below_the_threshold_approves():
-    decision = PolicyEngine().evaluate(
-        transaction=transaction(value="99999.99", hour=3),
-        actor=actor(),
-        evidence=evidence(),
-    )
-
-    assert decision.decision == DecisionOutcome.APPROVE
-
-
-def test_high_value_inside_the_window_approves():
-    decision = PolicyEngine().evaluate(
-        transaction=transaction(value="500000.00", hour=14),
-        actor=actor(),
-        evidence=evidence(),
-    )
-
-    assert decision.decision == DecisionOutcome.APPROVE
 
 
 @pytest.mark.parametrize(
@@ -234,100 +332,37 @@ def test_window_boundaries_are_inclusive_of_start_and_exclusive_of_end(hour, out
 
 
 def test_a_retuned_window_changes_which_requests_are_held():
-    engine = PolicyEngine(
-        config=PolicyConfig(
-            high_value_threshold=Decimal("100000.00"),
-            window_start_hour=8,
-            window_end_hour=17,
-        )
-    )
+    engine = PolicyEngine(config=PolicyConfig(window_start_hour=8, window_end_hour=17))
 
     # 07:30 sits inside the default window but outside this one.
     held = engine.evaluate(
-        transaction=transaction(value="200000.00", hour=7),
+        transaction=transaction(hour=7),
         actor=actor(),
         evidence=evidence(),
     )
     assert held.decision == DecisionOutcome.HOLD
 
     approved = engine.evaluate(
-        transaction=transaction(value="200000.00", hour=9),
+        transaction=transaction(hour=9),
         actor=actor(),
         evidence=evidence(),
     )
     assert approved.decision == DecisionOutcome.APPROVE
 
 
-def test_a_retuned_threshold_changes_which_requests_are_held():
-    engine = PolicyEngine(
-        config=PolicyConfig(
-            high_value_threshold=Decimal("500000.00"),
-            window_start_hour=6,
-            window_end_hour=20,
-        )
-    )
-
-    decision = engine.evaluate(
-        transaction=transaction(value="250000.00", hour=3),
+def test_the_category_hold_outranks_the_window_hold():
+    decision = PolicyEngine().evaluate(
+        transaction=transaction(category="HAZARDOUS", hour=3),
         actor=actor(),
         evidence=evidence(),
     )
 
-    assert decision.decision == DecisionOutcome.APPROVE
+    assert decision.required_authority == "ROLE_SAFETY_OFFICER"
 
 
-# ---------------------------------------------------------------------------
-# Rule 5 — SIM swap on a high-value request
-# ---------------------------------------------------------------------------
-
-
-def test_sim_swap_with_high_value_holds_for_the_security_officer():
+def test_a_deny_outranks_every_hold_rule():
     decision = PolicyEngine().evaluate(
-        transaction=transaction(value="150000.00", hour=14),
-        actor=actor(),
-        evidence=evidence(sim_swap=True),
-    )
-
-    assert decision.decision == DecisionOutcome.HOLD
-    assert decision.required_authority == "ROLE_SECURITY_OFFICER"
-
-
-def test_sim_swap_on_a_low_value_request_approves():
-    """The swap alone is not disqualifying; it is the pairing with value."""
-    decision = PolicyEngine().evaluate(
-        transaction=transaction(value="500.00", hour=14),
-        actor=actor(),
-        evidence=evidence(sim_swap=True),
-    )
-
-    assert decision.decision == DecisionOutcome.APPROVE
-
-
-def test_sim_swap_not_collected_does_not_hold():
-    decision = PolicyEngine().evaluate(
-        transaction=transaction(value="150000.00", hour=14),
-        actor=actor(),
-        evidence=evidence(sim_swap=None),
-    )
-
-    assert decision.decision == DecisionOutcome.APPROVE
-
-
-def test_window_hold_outranks_the_sim_swap_hold():
-    """Both rules fire; the earlier one decides which authority is named."""
-    decision = PolicyEngine().evaluate(
-        transaction=transaction(value="150000.00", hour=3),
-        actor=actor(),
-        evidence=evidence(sim_swap=True),
-    )
-
-    assert decision.decision == DecisionOutcome.HOLD
-    assert decision.required_authority == "ROLE_CARGO_SUPERVISOR"
-
-
-def test_a_deny_outranks_both_hold_rules():
-    decision = PolicyEngine().evaluate(
-        transaction=transaction(value="500000.00", hour=3),
+        transaction=transaction(category="WEAPONS", hour=3),
         actor=actor(),
         evidence=evidence(location=False, sim_swap=True),
     )
@@ -336,7 +371,7 @@ def test_a_deny_outranks_both_hold_rules():
 
 
 # ---------------------------------------------------------------------------
-# Rule 6 — approval, and what never influences it
+# Rule 7 — approval, and what never influences it
 # ---------------------------------------------------------------------------
 
 

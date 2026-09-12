@@ -61,6 +61,12 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.6-flash}
       - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      # Console sign-in. The demo password is what gets someone into the
+      # console on a fresh database; the cookie stays non-Secure because the
+      # demo is served over plain http.
+      - SESSION_TTL_HOURS=${SESSION_TTL_HOURS:-12}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+      - DEMO_OPERATOR_PASSWORD=${DEMO_OPERATOR_PASSWORD:-zonegate-demo}
     volumes:
       - ./.docker:/app/.docker
     extra_hosts:

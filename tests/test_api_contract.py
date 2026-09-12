@@ -66,6 +66,7 @@ def transaction_payload(
     value: str = "15000.00",
     hour: int = 14,
     actor_id: str = "usr_cargo_operator_01",
+    category: str = "GENERAL",
 ) -> dict:
     return {
         "transaction_id": transaction_id,
@@ -75,6 +76,7 @@ def transaction_payload(
         "zone": "PORT_GATE_17",
         "timestamp": f"2026-09-10T{hour:02d}:30:00Z",
         "value": value,
+        "category": category,
     }
 
 
@@ -565,7 +567,7 @@ async def test_policy_config_rejects_an_hour_outside_the_clock():
         response = await client.put(
             "/v1/policy/config",
             json={
-                "high_value_threshold": "100000.00",
+                "restricted_categories": {"WEAPONS": "ROLE_SECURITY_OFFICER"},
                 "window_start_hour": 25,
                 "window_end_hour": 20,
             },
@@ -575,15 +577,15 @@ async def test_policy_config_rejects_an_hour_outside_the_clock():
 
 
 @pytest.mark.asyncio
-async def test_policy_config_rejects_a_non_positive_threshold():
-    """A zero threshold would make every request high-value."""
+async def test_policy_config_rejects_a_restricted_category_with_no_authority():
+    """A category with nobody to escalate to would release while looking restricted."""
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
         response = await client.put(
             "/v1/policy/config",
             json={
-                "high_value_threshold": "0",
+                "restricted_categories": {"WEAPONS": ""},
                 "window_start_hour": 6,
                 "window_end_hour": 20,
             },
@@ -593,7 +595,7 @@ async def test_policy_config_rejects_a_non_positive_threshold():
 
 
 @pytest.mark.asyncio
-async def test_a_saved_threshold_changes_the_next_decision_over_http():
+async def test_a_saved_category_map_changes_the_next_decision_over_http():
     """End to end: the console saves, and the very next request is judged by it."""
     app = create_app(settings())
 
@@ -604,15 +606,16 @@ async def test_a_saved_threshold_changes_the_next_decision_over_http():
         first = (
             await client.post(
                 "/v1/authorizations",
-                json=transaction_payload("tx_cfg_before", value="150000.00", hour=3),
+                json=transaction_payload("tx_cfg_before", category="HAZARDOUS"),
             )
         ).json()["decision"]
         assert first["decision"] == "HOLD"
+        assert first["required_authority"] == "ROLE_SAFETY_OFFICER"
 
         await client.put(
             "/v1/policy/config",
             json={
-                "high_value_threshold": "500000.00",
+                "restricted_categories": {"WEAPONS": "ROLE_SECURITY_OFFICER"},
                 "window_start_hour": 6,
                 "window_end_hour": 20,
             },
@@ -621,7 +624,7 @@ async def test_a_saved_threshold_changes_the_next_decision_over_http():
         second = (
             await client.post(
                 "/v1/authorizations",
-                json=transaction_payload("tx_cfg_after", value="150000.00", hour=3),
+                json=transaction_payload("tx_cfg_after", category="HAZARDOUS"),
             )
         ).json()["decision"]
 
@@ -647,9 +650,9 @@ async def test_retuning_policy_does_not_rewrite_decisions_already_recorded():
         await client.put(
             "/v1/policy/config",
             json={
-                "high_value_threshold": "500000.00",
-                "window_start_hour": 6,
-                "window_end_hour": 20,
+                "restricted_categories": {},
+                "window_start_hour": 0,
+                "window_end_hour": 24,
             },
         )
 

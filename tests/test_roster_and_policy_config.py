@@ -92,17 +92,17 @@ async def test_roster_survives_reenrolment_without_duplicating():
 
 @pytest.mark.asyncio
 async def test_policy_config_round_trips_and_rebinds_the_engine():
-    """Saving thresholds must change what the running engine evaluates against."""
+    """Saving policy must change what the running engine evaluates against."""
     app = create_app(_test_settings())
 
     async with AsyncTestClient(app=app) as client:
         default = (await client.get("/v1/policy/config")).json()
-        assert Decimal(default["high_value_threshold"]) == Decimal("100000.00")
+        assert default["restricted_categories"]["WEAPONS"] == "ROLE_SECURITY_OFFICER"
 
         response = await client.put(
             "/v1/policy/config",
             json={
-                "high_value_threshold": "250000.00",
+                "restricted_categories": {"PERISHABLE": "ROLE_COLD_CHAIN_LEAD"},
                 "window_start_hour": 5,
                 "window_end_hour": 19,
             },
@@ -110,7 +110,9 @@ async def test_policy_config_round_trips_and_rebinds_the_engine():
         assert response.status_code == 200
 
         engine = app.state.auth_service.policy_engine
-        assert engine.high_value_threshold == Decimal("250000.00")
+        assert engine.config.authority_for("PERISHABLE") == "ROLE_COLD_CHAIN_LEAD"
+        # A category dropped from the map stops escalating.
+        assert engine.config.authority_for("WEAPONS") is None
 
         # 19:30 sat inside the default window but falls outside the new one.
         outside = datetime(2026, 9, 10, 19, 30, tzinfo=timezone.utc)
@@ -129,7 +131,6 @@ async def test_policy_config_rejects_an_inverted_window():
         response = await client.put(
             "/v1/policy/config",
             json={
-                "high_value_threshold": "100000.00",
                 "window_start_hour": 20,
                 "window_end_hour": 6,
             },
@@ -145,14 +146,14 @@ async def test_policy_config_rejects_an_inverted_window():
 
 @pytest.mark.asyncio
 async def test_stored_policy_config_is_loaded_on_startup():
-    """A retuned threshold has to survive a restart, or it silently reverts."""
+    """Retuned policy has to survive a restart, or it silently reverts."""
     settings = _test_settings()
 
     first = create_app(settings)
     async with AsyncTestClient(app=first):
         await first.state.store.save_policy_config(
             PolicyConfig(
-                high_value_threshold=Decimal("400000.00"),
+                restricted_categories={"HAZARDOUS": "ROLE_SAFETY_OFFICER"},
                 window_start_hour=7,
                 window_end_hour=18,
             )
@@ -161,5 +162,5 @@ async def test_stored_policy_config_is_loaded_on_startup():
         stored = await first.state.store.get_policy_config()
 
     assert stored is not None
-    assert stored.high_value_threshold == Decimal("400000.00")
+    assert stored.restricted_categories == {"HAZARDOUS": "ROLE_SAFETY_OFFICER"}
     assert stored.window_start_hour == 7

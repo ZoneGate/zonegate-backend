@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     # Token Service Configuration
     TOKEN_SECRET_KEY: str = "zonegate-token-secret-key-initial-scaffold"
 
+    # Console sign-in
+    SESSION_TTL_HOURS: int = 12
+    # A Secure cookie is never sent back over plain http, which is what a demo
+    # machine serves; turn this on wherever the console is behind TLS.
+    SESSION_COOKIE_SECURE: bool = False
+    # Password given to the auto-seeded demo operator on a fresh database.
+    # Blank leaves the demo actor unable to sign in to the console.
+    DEMO_OPERATOR_PASSWORD: str = "zonegate-demo"
+
     # Browser origins permitted to call the API (comma separated)
     CORS_ALLOW_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 

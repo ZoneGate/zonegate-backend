@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from decimal import Decimal
 import uuid
 from zonegate.domain.actors import Actor
 from zonegate.domain.decisions import (
@@ -11,13 +10,15 @@ from zonegate.domain.evidence import CanonicalEvidence
 from zonegate.domain.policy_config import PolicyConfig
 from zonegate.domain.transactions import TransactionRequest
 
-# Thresholds
-HIGH_VALUE_THRESHOLD = Decimal("100000.00")
-
 # Action-to-permission mapping
 ACTION_PERMISSIONS: dict[str, str] = {
     "RELEASE_CARGO": "cargo:release",
 }
+
+# The role an out-of-hours release answers to when its category is otherwise
+# unrestricted. Restricted categories name their own authority in the config.
+OFF_HOURS_AUTHORITY = "ROLE_CARGO_SUPERVISOR"
+SIM_SWAP_AUTHORITY = "ROLE_SECURITY_OFFICER"
 
 
 class PolicyEngine:
@@ -27,20 +28,8 @@ class PolicyEngine:
     but cannot dictate or override policy decisions.
     """
 
-    def __init__(
-        self,
-        high_value_threshold: Decimal = HIGH_VALUE_THRESHOLD,
-        config: PolicyConfig | None = None,
-    ) -> None:
-        # `config` is the current form; the bare threshold argument is kept so
-        # existing callers and tests that pass one keep working.
-        self.config = config or PolicyConfig(
-            high_value_threshold=high_value_threshold
-        )
-
-    @property
-    def high_value_threshold(self) -> Decimal:
-        return self.config.high_value_threshold
+    def __init__(self, config: PolicyConfig | None = None) -> None:
+        self.config = config or PolicyConfig()
 
     def is_outside_expected_window(self, timestamp: datetime) -> bool:
         """Whether the timestamp falls outside the configured operational window."""
@@ -56,7 +45,6 @@ class PolicyEngine:
         evidence: CanonicalEvidence,
         context_evaluation: ContextEvaluation | None = None,
     ) -> PolicyDecision:
-        reasons: list[str] = []
         decision_id = f"dec_{uuid.uuid4().hex[:12]}"
         now = datetime.now(timezone.utc)
 
@@ -68,95 +56,80 @@ class PolicyEngine:
             "reachable": evidence.reachable,
         }
 
-        # Rule 1: Permission mismatch -> DENY
-        required_perm = ACTION_PERMISSIONS.get(transaction.action, f"{transaction.action.lower()}:execute")
-        if required_perm not in actor.permissions:
-            reasons.append(f"Actor lacks required permission '{required_perm}' for action '{transaction.action}'")
+        def outcome(
+            decision: DecisionOutcome,
+            reason: str,
+            required_authority: str | None = None,
+        ) -> PolicyDecision:
             return PolicyDecision(
                 decision_id=decision_id,
                 transaction_id=transaction.transaction_id,
-                decision=DecisionOutcome.DENY,
-                reasons=reasons,
-                required_authority=None,
+                decision=decision,
+                reasons=[reason],
+                required_authority=required_authority,
                 context_evaluation=context_evaluation,
                 evidence_summary=evidence_summary,
                 decided_at=now,
+            )
+
+        # Rule 1: Permission mismatch -> DENY
+        required_perm = ACTION_PERMISSIONS.get(
+            transaction.action, f"{transaction.action.lower()}:execute"
+        )
+        if required_perm not in actor.permissions:
+            return outcome(
+                DecisionOutcome.DENY,
+                f"Actor lacks required permission '{required_perm}' for action '{transaction.action}'",
             )
 
         # Rule 2: Number verification != True -> DENY
         if evidence.number_verified is not True:
-            reasons.append("Subscriber number verification failed or was not verified")
-            return PolicyDecision(
-                decision_id=decision_id,
-                transaction_id=transaction.transaction_id,
-                decision=DecisionOutcome.DENY,
-                reasons=reasons,
-                required_authority=None,
-                context_evaluation=context_evaluation,
-                evidence_summary=evidence_summary,
-                decided_at=now,
+            return outcome(
+                DecisionOutcome.DENY,
+                "Subscriber number verification failed or was not verified",
             )
 
         # Rule 3: Location verification == False -> DENY
         if evidence.location_verified is False:
-            reasons.append("Device location geofence check failed: device is outside authorized zone")
-            return PolicyDecision(
-                decision_id=decision_id,
-                transaction_id=transaction.transaction_id,
-                decision=DecisionOutcome.DENY,
-                reasons=reasons,
-                required_authority=None,
-                context_evaluation=context_evaluation,
-                evidence_summary=evidence_summary,
-                decided_at=now,
+            return outcome(
+                DecisionOutcome.DENY,
+                "Device location geofence check failed: device is outside authorized zone",
             )
 
-        # Rule 4: High-value AND outside expected window -> HOLD
-        is_high_val = transaction.value >= self.high_value_threshold
-        outside_window = self.is_outside_expected_window(transaction.timestamp)
-
-        if is_high_val and outside_window:
-            reasons.append(
-                f"High-value transaction (${transaction.value}) requested outside expected operational window "
-                f"({transaction.timestamp.strftime('%H:%M')} UTC; window is "
-                f"{self.config.window_start_hour:02d}:00-{self.config.window_end_hour:02d}:00 UTC)"
-            )
-            return PolicyDecision(
-                decision_id=decision_id,
-                transaction_id=transaction.transaction_id,
-                decision=DecisionOutcome.HOLD,
-                reasons=reasons,
-                required_authority="ROLE_CARGO_SUPERVISOR",
-                context_evaluation=context_evaluation,
-                evidence_summary=evidence_summary,
-                decided_at=now,
+        # Rule 4: Recent SIM swap -> HOLD.
+        # A swapped SIM means the line the evidence was collected over may no
+        # longer be the operator's, so no category is safe to release on it.
+        if evidence.recent_sim_swap is True:
+            return outcome(
+                DecisionOutcome.HOLD,
+                "Recent carrier SIM swap detected on the subscriber device; the line "
+                "the network evidence was collected over may have changed hands",
+                SIM_SWAP_AUTHORITY,
             )
 
-        # Rule 5: Recent SIM swap AND high-value -> HOLD
-        if evidence.recent_sim_swap is True and is_high_val:
-            reasons.append(
-                f"Recent carrier SIM swap detected on subscriber device for high-value transaction (${transaction.value})"
-            )
-            return PolicyDecision(
-                decision_id=decision_id,
-                transaction_id=transaction.transaction_id,
-                decision=DecisionOutcome.HOLD,
-                reasons=reasons,
-                required_authority="ROLE_SECURITY_OFFICER",
-                context_evaluation=context_evaluation,
-                evidence_summary=evidence_summary,
-                decided_at=now,
+        # Rule 5: Restricted cargo category -> HOLD, to that category's authority.
+        restricted_authority = self.config.authority_for(transaction.category)
+        if restricted_authority:
+            return outcome(
+                DecisionOutcome.HOLD,
+                f"Cargo category '{transaction.category}' is restricted and is released "
+                f"only on the approval of {restricted_authority}",
+                restricted_authority,
             )
 
-        # Rule 6: Otherwise -> APPROVE
-        reasons.append("All network identity and geofence verifications passed deterministic policy checks")
-        return PolicyDecision(
-            decision_id=decision_id,
-            transaction_id=transaction.transaction_id,
-            decision=DecisionOutcome.APPROVE,
-            reasons=reasons,
-            required_authority=None,
-            context_evaluation=context_evaluation,
-            evidence_summary=evidence_summary,
-            decided_at=now,
+        # Rule 6: Outside the expected operational window -> HOLD
+        if self.is_outside_expected_window(transaction.timestamp):
+            return outcome(
+                DecisionOutcome.HOLD,
+                f"Release requested at {transaction.timestamp.strftime('%H:%M')} UTC, outside the "
+                f"expected operational window "
+                f"({self.config.window_start_hour:02d}:00-{self.config.window_end_hour:02d}:00 UTC)",
+                OFF_HOURS_AUTHORITY,
+            )
+
+        # Rule 7: Otherwise -> APPROVE
+        return outcome(
+            DecisionOutcome.APPROVE,
+            f"Category '{transaction.category}' is unrestricted and all network identity "
+            "and geofence verifications passed deterministic policy checks",
         )

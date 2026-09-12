@@ -13,11 +13,13 @@ from zonegate.agent.evidence_planner import EvidencePlanner
 from zonegate.agent.gemini import GeminiClient
 from zonegate.agent.ollama import OllamaClient
 from zonegate.api.actors import ActorsController
+from zonegate.api.auth import AuthController
 from zonegate.api.authorization import AuthorizationController
 from zonegate.api.health import health_check
 from zonegate.api.policy import PolicyController
 from zonegate.api.receipts import ReceiptsController
 from zonegate.api.tokens import TokensController
+from zonegate.authorization.console import ConsoleAuthService
 from zonegate.authorization.service import AuthorizationService
 from zonegate.authorization.token import TokenService
 from zonegate.config import Settings, get_settings
@@ -42,6 +44,14 @@ def provide_llm(state: State) -> LLMClientProtocol:
 
 def provide_auth_service(state: State) -> AuthorizationService:
     return state.auth_service
+
+
+def provide_console_auth(state: State) -> ConsoleAuthService:
+    return state.console_auth
+
+
+def provide_settings(state: State) -> Settings:
+    return state.settings
 
 
 def create_app(settings: Settings | None = None) -> Litestar:
@@ -100,6 +110,10 @@ def create_app(settings: Settings | None = None) -> Litestar:
             context_evaluator=evaluator,
         )
 
+        console_auth = ConsoleAuthService(store=store, session_ttl_hours=cfg.SESSION_TTL_HOURS)
+
+        app.state.settings = cfg
+        app.state.console_auth = console_auth
         app.state.store = store
         app.state.llm_client = llm_client
         app.state.nokia_client = nokia_client
@@ -128,6 +142,12 @@ def create_app(settings: Settings | None = None) -> Litestar:
             )
             await store.save_actor(demo_actor)
             await store.save_device_binding(demo_binding)
+
+            # Without a password the console has nobody to let in on a fresh
+            # database, and the sign-in screen becomes a dead end.
+            if cfg.DEMO_OPERATOR_PASSWORD:
+                await console_auth.set_password(demo_actor.actor_id, cfg.DEMO_OPERATOR_PASSWORD)
+
             logger.info("Auto-seeded default demo actor 'usr_cargo_operator_01' into Zova storage")
 
         try:
@@ -141,6 +161,10 @@ def create_app(settings: Settings | None = None) -> Litestar:
         allow_origins=[origin.strip() for origin in cfg.CORS_ALLOW_ORIGINS.split(",") if origin.strip()],
         allow_methods=["GET", "POST", "PUT", "OPTIONS"],
         allow_headers=["Content-Type"],
+        # The console session is a cookie, so a cross-origin console has to be
+        # allowed to send it. Same-origin deployments go through the site's own
+        # proxy and never reach this.
+        allow_credentials=True,
     )
 
     logging_config = LoggingConfig(
@@ -157,6 +181,7 @@ def create_app(settings: Settings | None = None) -> Litestar:
         route_handlers=[
             health_check,
             ActorsController,
+            AuthController,
             AuthorizationController,
             PolicyController,
             ReceiptsController,
@@ -167,6 +192,8 @@ def create_app(settings: Settings | None = None) -> Litestar:
             "store": Provide(provide_store, sync_to_thread=False),
             "llm_client": Provide(provide_llm, sync_to_thread=False),
             "auth_service": Provide(provide_auth_service, sync_to_thread=False),
+            "console_auth": Provide(provide_console_auth, sync_to_thread=False),
+            "settings": Provide(provide_settings, sync_to_thread=False),
         },
         lifespan=[lifespan],
         logging_config=logging_config,
