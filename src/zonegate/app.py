@@ -26,7 +26,8 @@ from zonegate.config import Settings, get_settings
 from zonegate.domain.actors import Actor, DeviceBinding
 from zonegate.evidence.gateway import EvidenceGateway
 from zonegate.evidence.plan_validator import EvidencePlanValidator
-from zonegate.integrations.nokia.client import NokiaEvidenceClient
+from zonegate.integrations.nokia.client import NokiaClientProtocol, NokiaEvidenceClient
+from zonegate.integrations.nokia.live import NokiaLiveEvidenceClient
 from zonegate.integrations.nokia.mcp import NokiaMCPClient
 from zonegate.policy.engine import PolicyEngine
 from zonegate.storage.zova import ZoneGateStore
@@ -78,10 +79,20 @@ def create_app(settings: Settings | None = None) -> Litestar:
             )
             logger.info("Using Ollama AI provider at '%s'", cfg.OLLAMA_BASE_URL)
 
-        nokia_client = NokiaEvidenceClient(
-            base_url=cfg.NOKIA_BASE_URL,
-            api_key=cfg.NOKIA_API_KEY,
-        )
+        nokia_client: NokiaClientProtocol
+        if cfg.CARRIER_MODE.lower() == "live":
+            nokia_client = NokiaLiveEvidenceClient(
+                api_key=cfg.NOKIA_API_KEY,
+                mcp_url=cfg.NOKIA_MCP_URL,
+                api_host=cfg.NOKIA_API_HOST,
+            )
+            logger.info("Collecting evidence from the live Nokia gateway at '%s'", cfg.NOKIA_MCP_URL)
+        else:
+            nokia_client = NokiaEvidenceClient(
+                base_url=cfg.NOKIA_BASE_URL,
+                api_key=cfg.NOKIA_API_KEY,
+            )
+            logger.info("Collecting evidence over CAMARA REST at '%s'", cfg.NOKIA_BASE_URL)
 
         # Initialize Nokia Network as Code MCP client with static allowlist
         nokia_mcp_client = None

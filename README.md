@@ -83,10 +83,49 @@ not evidence that passed.
 ## Current Integration Status
 
 ### Nokia / CAMARA Integration
-- Standard CAMARA models implemented for Number Verification, Location Verification, SIM Swap, Device Swap, and Device Reachability.
-- `NokiaEvidenceClient` implements async HTTP calls conforming to CAMARA specs using `httpx.AsyncClient`.
+
+There are two carrier surfaces, chosen with `CARRIER_MODE`, and they are not
+interchangeable.
+
+**`CARRIER_MODE=rest` (default)** — `NokiaEvidenceClient` posts CAMARA-shaped
+requests to `NOKIA_BASE_URL`. This is what `scripts/mock_camara.py` serves and
+what a CAMARA-conformant operator endpoint would serve. It is the right choice
+for the demo stack and for offline work.
+
+**`CARRIER_MODE=live`** — `NokiaLiveEvidenceClient` talks to the production
+Nokia Network as Code gateway. That gateway is not plain CAMARA REST: it takes
+JSON-RPC `tools/call` requests at `NOKIA_MCP_URL`, selects the product with an
+`x-api-host` header, and authenticates with `x-api-key` rather than a bearer
+token. The CAMARA operations sit behind tool names, several at a different
+version than the specifications suggest:
+
+| Check | Live tool | Path behind it |
+| --- | --- | --- |
+| Number verification | `phoneNumberVerify-NV-V2` | `/passthrough/camara/v1/number-verification/number-verification/v2/verify` |
+| Location verification | `verifyLocation-LocV-V0` | `/location-verification/v0/verify` |
+| SIM swap | `checkSimSwap` | `/passthrough/camara/v1/sim-swap/sim-swap/v0/check` |
+| Device swap | `checkDeviceSwap` | `/passthrough/camara/v1/device-swap/device-swap/v1/check` |
+| Reachability | `getReachabilityStatus` | `/device-status/device-reachability-status/v1/retrieve` |
+
+Two shapes differ from the specifications and were observed on the live
+gateway: `areaType` is the upper-case enum `CIRCLE`, and reachability answers
+`{"reachable": true, "connectivity": ["DATA"]}` rather than a
+`reachabilityStatus` enum. `CamaraReachabilityResponse.is_reachable` reads
+both, so the difference stops at the integration boundary.
+
+**Number verification cannot be collected server-side.** CAMARA identifies the
+subscriber from a three-legged token minted over the device's own mobile
+connection, not from the phone number in the request body; called from a
+server the gateway answers `MISSING_IDENTIFIER`. The live client therefore
+declines the check rather than reporting `False`, which would read as the
+carrier denying the number. The Evidence Gateway records it as **not
+collected**, and because Rule 2 refuses to read missing evidence as a pass, a
+live-mode release is denied with a reason that says the check was never
+answered. Collecting it for real requires the handset to complete the CAMARA
+authorization flow and pass the resulting token up with the release request.
+
 - In test environments, deterministic test doubles (`FakeNokiaClient`) verify all gateway authorization rules offline without external network dependency.
-- Production deployment requires valid Nokia Network as Code API credentials (`NOKIA_BASE_URL` and `NOKIA_API_KEY`).
+- `tests/test_nokia_live_client.py` pins the live tool names, argument shapes, and real response bodies, so a request shaped for the mock can no longer pass for a request the carrier would accept.
 
 ### Nokia Network as Code MCP Server (Model Context Protocol)
 - Supports the official Nokia RapidAPI Hub MCP server via `mcp-remote`:

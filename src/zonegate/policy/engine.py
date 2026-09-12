@@ -82,11 +82,23 @@ class PolicyEngine:
                 f"Actor lacks required permission '{required_perm}' for action '{transaction.action}'",
             )
 
-        # Rule 2: Number verification != True -> DENY
+        # Rule 2: Number verification != True -> DENY.
+        # Both branches deny -- unverified is unverified -- but they are not
+        # the same event and must not read as the same one. "The carrier says
+        # this is not your number" is a finding against the operator; "nobody
+        # asked" is a finding against the deployment, and the person reading
+        # the denial can only fix the second if the reason says so.
+        if evidence.number_verified is None:
+            return outcome(
+                DecisionOutcome.DENY,
+                "Subscriber number verification was not collected, so the number on "
+                "this device is unproven; the carrier did not answer the check",
+            )
         if evidence.number_verified is not True:
             return outcome(
                 DecisionOutcome.DENY,
-                "Subscriber number verification failed or was not verified",
+                "Subscriber number verification failed: the carrier did not confirm "
+                "the registered number on this device",
             )
 
         # Rule 3: Location verification == False -> DENY

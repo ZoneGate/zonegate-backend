@@ -47,6 +47,10 @@ services:
       - ZOVA_DB_PATH=/app/.docker/zonegate.zova
       # The mock, reachable on the compose network. To decide on a real
       # carrier, use CARRIER_URL and CARRIER_KEY (see the README).
+      # "rest" against the mock below. Set CARRIER_MODE=live with a real
+      # Network as Code key to collect evidence from the production gateway;
+      # NOKIA_BASE_URL is then ignored.
+      - CARRIER_MODE=${CARRIER_MODE:-rest}
       - NOKIA_BASE_URL=${CARRIER_URL:-http://camara-mock:8899}
       - NOKIA_API_KEY=${CARRIER_KEY:-mock-nokia-api-key}
       # The mock speaks REST, not MCP.

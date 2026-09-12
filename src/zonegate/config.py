@@ -27,9 +27,21 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-3.6-flash"
 
+    # Which carrier the Evidence Gateway actually calls.
+    #   "rest" - CAMARA REST at NOKIA_BASE_URL (the bundled mock, or a
+    #            conformant operator endpoint)
+    #   "live" - the Nokia Network as Code MCP gateway, using NOKIA_API_KEY
+    # Defaults to "rest" so a machine with no carrier subscription still runs.
+    CARRIER_MODE: str = "rest"
+
     # Nokia / CAMARA Gateway Configuration
     NOKIA_BASE_URL: str = "https://api.nokia.example.com"
     NOKIA_API_KEY: str = "mock-key"
+
+    # The live Network as Code gateway. The key is sent as `x-api-key` and the
+    # product is selected with `x-api-host`; neither is a bearer token.
+    NOKIA_MCP_URL: str = "https://mcp.prodeu.apihub.nokia.io"
+    NOKIA_API_HOST: str = "network-as-code.nokia.rapidapi.com"
 
     # Nokia Network as Code MCP Configuration
     NOKIA_MCP_ENABLED: bool = True

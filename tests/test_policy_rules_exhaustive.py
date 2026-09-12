@@ -131,6 +131,27 @@ def test_number_not_positively_verified_denies(number_state):
     assert "number verification" in decision.reasons[0].lower()
 
 
+def test_a_check_nobody_answered_is_not_reported_as_a_failed_check():
+    """Both deny, but the operator needs to know which of the two happened.
+
+    A failed check is a finding about this request. An uncollected one is a
+    finding about the deployment -- the carrier was never asked, or would not
+    answer -- and only the second is something the reader can go and fix.
+    """
+    not_collected = PolicyEngine().evaluate(
+        transaction=transaction(), actor=actor(), evidence=evidence(number=None)
+    )
+    failed = PolicyEngine().evaluate(
+        transaction=transaction(), actor=actor(), evidence=evidence(number=False)
+    )
+
+    assert not_collected.decision == DecisionOutcome.DENY
+    assert failed.decision == DecisionOutcome.DENY
+    assert "not collected" in not_collected.reasons[0].lower()
+    assert "not collected" not in failed.reasons[0].lower()
+    assert not_collected.reasons[0] != failed.reasons[0]
+
+
 def test_number_failure_outranks_a_location_failure_in_the_reason_given():
     """Rule order decides which failure the operator is told about first."""
     decision = PolicyEngine().evaluate(

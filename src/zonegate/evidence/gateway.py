@@ -1,8 +1,30 @@
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from zonegate.domain.actors import Actor, DeviceBinding
 from zonegate.domain.evidence import CanonicalEvidence, EvidenceKind, ValidatedEvidencePlan
 from zonegate.domain.transactions import TransactionRequest
 from zonegate.integrations.nokia.client import NokiaClientProtocol
+from zonegate.integrations.nokia.live import CarrierCapabilityUnavailableError
+
+logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _declining(kind: EvidenceKind) -> Iterator[None]:
+    """Let a check the carrier refuses to answer stay unanswered.
+
+    A refusal is not a transport failure and not a failed check. Leaving the
+    field at None records it as not collected, which the policy engine already
+    refuses to read as a pass -- so a capability this subscription does not
+    have produces a denial with an honest reason instead of either a crash or
+    a check that silently looks like it succeeded.
+    """
+    try:
+        yield
+    except CarrierCapabilityUnavailableError as exc:
+        logger.warning("Carrier would not answer %s, recorded as not collected: %s", kind, exc)
 
 
 class EvidenceGatewayError(Exception):
@@ -118,26 +140,31 @@ class EvidenceGateway:
 
         try:
             if EvidenceKind.NUMBER_VERIFICATION in plan.combined:
-                res = await self._nokia_client.verify_number(binding.phone_number)
-                number_verified = res.devicePhoneNumberVerified
+                with _declining(EvidenceKind.NUMBER_VERIFICATION):
+                    res = await self._nokia_client.verify_number(binding.phone_number)
+                    number_verified = res.devicePhoneNumberVerified
 
             if EvidenceKind.LOCATION_VERIFICATION in plan.combined:
-                res = await self._nokia_client.verify_location(
-                    binding.phone_number, lat, lon, radius
-                )
-                location_verified = res.verificationResult == "TRUE"
+                with _declining(EvidenceKind.LOCATION_VERIFICATION):
+                    res = await self._nokia_client.verify_location(
+                        binding.phone_number, lat, lon, radius
+                    )
+                    location_verified = res.verificationResult == "TRUE"
 
             if EvidenceKind.SIM_SWAP in plan.combined:
-                res = await self._nokia_client.check_sim_swap(binding.phone_number)
-                recent_sim_swap = res.swapped
+                with _declining(EvidenceKind.SIM_SWAP):
+                    res = await self._nokia_client.check_sim_swap(binding.phone_number)
+                    recent_sim_swap = res.swapped
 
             if EvidenceKind.DEVICE_SWAP in plan.combined:
-                res = await self._nokia_client.check_device_swap(binding.phone_number)
-                recent_device_swap = res.swapped
+                with _declining(EvidenceKind.DEVICE_SWAP):
+                    res = await self._nokia_client.check_device_swap(binding.phone_number)
+                    recent_device_swap = res.swapped
 
             if EvidenceKind.REACHABILITY in plan.combined:
-                res = await self._nokia_client.get_reachability(binding.phone_number)
-                reachable = res.reachabilityStatus in ("CONNECTED_DATA", "CONNECTED_SMS")
+                with _declining(EvidenceKind.REACHABILITY):
+                    res = await self._nokia_client.get_reachability(binding.phone_number)
+                    reachable = res.is_reachable
         except EvidenceGatewayError:
             raise
         except Exception as exc:
