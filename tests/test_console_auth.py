@@ -352,3 +352,77 @@ async def test_the_demo_operator_is_seeded_with_a_usable_console_password():
         )
 
         assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_database_that_predates_sign_in_still_gets_a_console_password(tmp_path):
+    """The demo actor is already there, so seeding both together would miss it.
+
+    Two startups against one file: the first writes the actor with console
+    sign-in switched off, standing in for a deployment that predates it; the
+    second must notice the actor has no credential and give it one.
+    """
+    db = str(tmp_path / "upgrade.zova")
+
+    def at(password: str) -> Settings:
+        return Settings(
+            APP_ENV="development",
+            ZOVA_DB_PATH=db,
+            NOKIA_MCP_ENABLED=False,
+            LLM_PROVIDER="ollama",
+            OLLAMA_BASE_URL="http://127.0.0.1:59999",
+            DEMO_OPERATOR_PASSWORD=password,
+        )
+
+    before = create_app(at(""))
+    async with AsyncTestClient(app=before):
+        assert await before.state.store.get_actor("usr_cargo_operator_01") is not None
+        assert await before.state.store.get_credential("usr_cargo_operator_01") is None
+
+    after = create_app(at("zonegate-demo"))
+    async with AsyncTestClient(app=after) as client:
+        response = await client.post(
+            "/v1/auth/login",
+            json={"actor_id": "usr_cargo_operator_01", "password": "zonegate-demo"},
+        )
+
+        assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_seeding_never_overwrites_a_password_somebody_already_set(tmp_path):
+    """A restart must not silently reset the demo operator to the default."""
+    db = str(tmp_path / "kept.zova")
+
+    def at() -> Settings:
+        return Settings(
+            APP_ENV="development",
+            ZOVA_DB_PATH=db,
+            NOKIA_MCP_ENABLED=False,
+            LLM_PROVIDER="ollama",
+            OLLAMA_BASE_URL="http://127.0.0.1:59999",
+            DEMO_OPERATOR_PASSWORD="zonegate-demo",
+        )
+
+    first = create_app(at())
+    async with AsyncTestClient(app=first) as client:
+        await client.post(
+            "/v1/auth/login",
+            json={"actor_id": "usr_cargo_operator_01", "password": "zonegate-demo"},
+        )
+        await client.post("/v1/auth/password", json={"password": "chosen-by-a-person"})
+
+    second = create_app(at())
+    async with AsyncTestClient(app=second) as client:
+        assert (
+            await client.post(
+                "/v1/auth/login",
+                json={"actor_id": "usr_cargo_operator_01", "password": "zonegate-demo"},
+            )
+        ).status_code == 401
+        assert (
+            await client.post(
+                "/v1/auth/login",
+                json={"actor_id": "usr_cargo_operator_01", "password": "chosen-by-a-person"},
+            )
+        ).status_code == 200

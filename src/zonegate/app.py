@@ -142,13 +142,22 @@ def create_app(settings: Settings | None = None) -> Litestar:
             )
             await store.save_actor(demo_actor)
             await store.save_device_binding(demo_binding)
-
-            # Without a password the console has nobody to let in on a fresh
-            # database, and the sign-in screen becomes a dead end.
-            if cfg.DEMO_OPERATOR_PASSWORD:
-                await console_auth.set_password(demo_actor.actor_id, cfg.DEMO_OPERATOR_PASSWORD)
-
             logger.info("Auto-seeded default demo actor 'usr_cargo_operator_01' into Zova storage")
+
+        # Checked separately from the actor above: a database that predates
+        # console sign-in already has the demo actor, so seeding the password
+        # only alongside a new actor would leave those deployments with a
+        # sign-in screen nobody can get past.
+        if (
+            cfg.APP_ENV != "test"
+            and cfg.DEMO_OPERATOR_PASSWORD
+            and await store.get_actor("usr_cargo_operator_01") is not None
+            and await store.get_credential("usr_cargo_operator_01") is None
+        ):
+            await console_auth.set_password(
+                "usr_cargo_operator_01", cfg.DEMO_OPERATOR_PASSWORD
+            )
+            logger.info("Seeded a console password for the demo operator")
 
         try:
             yield
