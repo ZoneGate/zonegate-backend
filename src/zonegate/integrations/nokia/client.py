@@ -1,5 +1,6 @@
 from typing import Protocol
 import httpx
+from zonegate.domain.evidence import EvidenceKind
 from zonegate.integrations.nokia.models import (
     CamaraCircleArea,
     CamaraCoordinates,
@@ -18,6 +19,10 @@ from zonegate.integrations.nokia.models import (
 
 
 class NokiaClientProtocol(Protocol):
+    # What this carrier can answer at all. A client that does not declare it
+    # is taken to answer everything, which is the strictest reading.
+    attestable_kinds: frozenset[EvidenceKind]
+
     async def verify_number(self, phone_number: str) -> CamaraNumberVerificationResponse:
         ...
 
@@ -49,9 +54,14 @@ class NokiaClientProtocol(Protocol):
 
 
 class NokiaEvidenceClient:
-    """Production Nokia Network As Code / CAMARA client using httpx.AsyncClient.
+    """A CAMARA-shaped REST client, pointed at a base URL.
 
-    Calls standardized CAMARA endpoints exposed by the Nokia Network as Code gateway.
+    This is what the bundled mock carrier serves and what a CAMARA-conformant
+    operator endpoint would serve. It is **not** the Nokia Network as Code
+    production gateway: that gateway exposes these capabilities as MCP tools
+    at different paths and versions and authenticates with `x-api-key`, so
+    these requests do not reach it. Use `NokiaLiveEvidenceClient` for the real
+    carrier and keep this one for the mock and for local CAMARA endpoints.
     """
 
     def __init__(
@@ -60,6 +70,9 @@ class NokiaEvidenceClient:
         api_key: str,
         client: httpx.AsyncClient | None = None,
     ) -> None:
+        # A conformant CAMARA endpoint answers all five, so nothing here is
+        # exempt from the rules that depend on them.
+        self.attestable_kinds = frozenset(EvidenceKind)
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self._client = client or httpx.AsyncClient(

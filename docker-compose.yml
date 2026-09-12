@@ -47,6 +47,10 @@ services:
       - ZOVA_DB_PATH=/app/.docker/zonegate.zova
       # The mock, reachable on the compose network. To decide on a real
       # carrier, use CARRIER_URL and CARRIER_KEY (see the README).
+      # "rest" against the mock below. Set CARRIER_MODE=live with a real
+      # Network as Code key to collect evidence from the production gateway;
+      # NOKIA_BASE_URL is then ignored.
+      - CARRIER_MODE=${CARRIER_MODE:-live}
       - NOKIA_BASE_URL=${CARRIER_URL:-http://camara-mock:8899}
       - NOKIA_API_KEY=${CARRIER_KEY:-mock-nokia-api-key}
       # The mock speaks REST, not MCP.
@@ -61,6 +65,12 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.6-flash}
       - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      # Console sign-in. The demo password is what gets someone into the
+      # console on a fresh database; the cookie stays non-Secure because the
+      # demo is served over plain http.
+      - SESSION_TTL_HOURS=${SESSION_TTL_HOURS:-12}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+      - DEMO_OPERATOR_PASSWORD=${DEMO_OPERATOR_PASSWORD:-zonegate-demo}
     volumes:
       - ./.docker:/app/.docker
     extra_hosts:

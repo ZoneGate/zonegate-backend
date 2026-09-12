@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
-from litestar import Controller, get, post
+from litestar import Controller, get, post, put
 from litestar.di import NamedDependency
-from litestar.exceptions import NotFoundException
+from litestar.exceptions import ClientException, NotFoundException
 from litestar.params import FromPath, FromQuery
 from pydantic import BaseModel, ConfigDict, Field
+from zonegate.authorization.console import ConsoleAuthService, WeakPasswordError
 from zonegate.authorization.service import AuthorizationService
 from zonegate.domain.actors import Actor, DeviceBinding
 
@@ -17,6 +18,15 @@ class EnrollmentRequest(BaseModel):
         default=None,
         description="Device to bind; defaults to the actor's registered device",
     )
+    password: str | None = Field(
+        default=None,
+        max_length=200,
+        description=(
+            "Optional initial console password. Omitted, the actor is enrolled for the "
+            "authorization pipeline but cannot sign in to the console — which is the "
+            "right shape for a field operator who only ever uses the mobile app."
+        ),
+    )
 
 
 class EnrollmentResponse(BaseModel):
@@ -24,6 +34,20 @@ class EnrollmentResponse(BaseModel):
 
     actor: Actor
     binding: DeviceBinding
+
+
+class PermissionUpdateRequest(BaseModel):
+    """Replaces an actor's permission set.
+
+    `expected_permissions` is what the editor was showing when the operator
+    pressed save. If the stored set has moved on since, the write is refused
+    rather than silently discarding whatever the other person changed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    permissions: list[str] = Field(..., max_length=200)
+    expected_permissions: list[str] = Field(...)
 
 
 class RosterEntry(BaseModel):
@@ -68,6 +92,7 @@ class ActorsController(Controller):
         self,
         data: EnrollmentRequest,
         auth_service: NamedDependency[AuthorizationService],
+        console_auth: NamedDependency[ConsoleAuthService],
     ) -> EnrollmentResponse:
         """Enrolls an actor and binds their device.
 
@@ -85,7 +110,44 @@ class ActorsController(Controller):
         await auth_service.store.save_actor(data.actor)
         await auth_service.store.save_device_binding(binding)
 
+        if data.password:
+            try:
+                await console_auth.set_password(data.actor.actor_id, data.password)
+            except WeakPasswordError as exc:
+                raise ClientException(detail=str(exc)) from exc
+
         return EnrollmentResponse(actor=data.actor, binding=binding)
+
+    @put("/{actor_id:str}/permissions")
+    async def update_permissions(
+        self,
+        actor_id: FromPath[str],
+        data: PermissionUpdateRequest,
+        auth_service: NamedDependency[AuthorizationService],
+    ) -> Actor:
+        """Replaces an enrolled actor's permissions.
+
+        Permissions are what Rule 1 of the policy engine checks, so this is the
+        one console screen that can turn a DENY into an APPROVE. It only ever
+        affects requests evaluated from here on.
+        """
+        actor = await auth_service.store.get_actor(actor_id)
+        if not actor:
+            raise NotFoundException(detail=f"Actor '{actor_id}' is not enrolled")
+
+        if sorted(actor.permissions) != sorted(data.expected_permissions):
+            raise ClientException(
+                status_code=409,
+                detail=(
+                    f"Permissions for '{actor_id}' changed while you were editing. "
+                    "Reload the employee and reapply your change."
+                ),
+            )
+
+        deduplicated = sorted({permission.strip() for permission in data.permissions if permission.strip()})
+        updated = actor.model_copy(update={"permissions": deduplicated})
+        await auth_service.store.save_actor(updated)
+        return updated
 
     @get("/{actor_id:str}")
     async def get_actor(

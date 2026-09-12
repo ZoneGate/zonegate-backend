@@ -1,16 +1,21 @@
 import asyncio
 import concurrent.futures
 import json
+import logging
 from pathlib import Path
 from typing import Callable, TypeVar
 import zova
+from pydantic import ValidationError
 from zonegate.authorization.token import ScopedAuthorizationToken
 from zonegate.domain.actors import Actor, DeviceBinding
+from zonegate.domain.credentials import ConsoleSession, OperatorCredential
 from zonegate.domain.policy_config import PolicyConfig
 from zonegate.domain.decisions import ContextEvaluation, PolicyDecision
 from zonegate.domain.evidence import CanonicalEvidence, ValidatedEvidencePlan
 from zonegate.domain.receipts import Receipt
 from zonegate.domain.transactions import TransactionRequest
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -27,6 +32,8 @@ class ZoneGateStore:
 
     NS_ACTORS = b"actors"
     NS_BINDINGS = b"device_bindings"
+    NS_CREDENTIALS = b"console_credentials"
+    NS_SESSIONS = b"console_sessions"
     NS_TRANSACTIONS = b"transactions"
     NS_PLANS = b"evidence_plans"
     NS_EVIDENCE = b"evidence"
@@ -184,6 +191,77 @@ class ZoneGateStore:
     async def save_device_binding(self, binding: DeviceBinding) -> None:
         await self._run(self._save_device_binding_sync, binding)
 
+    # --- Console credentials & sessions ---
+
+    def _get_credential_sync(self, actor_id: str) -> OperatorCredential | None:
+        assert self._db is not None
+        raw = self._db.kv_get(self.NS_CREDENTIALS, actor_id.encode("utf-8"))
+        if raw is None:
+            return None
+        return OperatorCredential.model_validate_json(raw.decode("utf-8"))
+
+    async def get_credential(self, actor_id: str) -> OperatorCredential | None:
+        """The console password record, or None for an actor who cannot sign in."""
+        return await self._run(self._get_credential_sync, actor_id)
+
+    def _save_credential_sync(self, credential: OperatorCredential) -> None:
+        assert self._db is not None
+        self._db.begin()
+        try:
+            self._db.kv_put(
+                self.NS_CREDENTIALS,
+                credential.actor_id.encode("utf-8"),
+                credential.model_dump_json().encode("utf-8"),
+            )
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
+
+    async def save_credential(self, credential: OperatorCredential) -> None:
+        await self._run(self._save_credential_sync, credential)
+
+    def _get_session_sync(self, session_id: str) -> ConsoleSession | None:
+        assert self._db is not None
+        raw = self._db.kv_get(self.NS_SESSIONS, session_id.encode("utf-8"))
+        if raw is None:
+            return None
+        return ConsoleSession.model_validate_json(raw.decode("utf-8"))
+
+    async def get_console_session(self, session_id: str) -> ConsoleSession | None:
+        return await self._run(self._get_session_sync, session_id)
+
+    def _save_session_sync(self, session: ConsoleSession) -> None:
+        assert self._db is not None
+        self._db.begin()
+        try:
+            self._db.kv_put(
+                self.NS_SESSIONS,
+                session.session_id.encode("utf-8"),
+                session.model_dump_json().encode("utf-8"),
+            )
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
+
+    async def save_console_session(self, session: ConsoleSession) -> None:
+        await self._run(self._save_session_sync, session)
+
+    def _delete_session_sync(self, session_id: str) -> None:
+        assert self._db is not None
+        self._db.begin()
+        try:
+            self._db.kv_delete(self.NS_SESSIONS, session_id.encode("utf-8"))
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
+
+    async def delete_console_session(self, session_id: str) -> None:
+        """Signing out has to actually revoke: the cookie alone is not the session."""
+        await self._run(self._delete_session_sync, session_id)
+
     # --- Policy configuration ---
 
     def _get_policy_config_sync(self) -> PolicyConfig | None:
@@ -191,7 +269,19 @@ class ZoneGateStore:
         raw = self._db.kv_get(self.NS_INDEXES, self.KEY_POLICY_CONFIG)
         if raw is None:
             return None
-        return PolicyConfig.model_validate_json(raw.decode("utf-8"))
+
+        try:
+            return PolicyConfig.model_validate_json(raw.decode("utf-8"))
+        except ValidationError:
+            # A database written before the restricted-category map replaced
+            # the value threshold. Refusing to start would strand every
+            # existing deployment; the engine falls back to its defaults and
+            # the console can save the shape it wants.
+            logger.warning(
+                "Stored policy configuration is not in the current shape and was "
+                "ignored; the engine is running on defaults until it is saved again"
+            )
+            return None
 
     async def get_policy_config(self) -> PolicyConfig | None:
         """Returns the stored thresholds, or None when never configured."""

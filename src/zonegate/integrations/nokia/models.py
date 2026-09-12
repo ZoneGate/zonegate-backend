@@ -51,9 +51,13 @@ class CamaraLocationVerificationRequest(BaseModel):
 
 
 class CamaraLocationVerificationResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Tolerant on purpose: the live gateway returns `lastLocationTime`
+    # alongside the verdict, and a stricter model would turn a perfectly good
+    # answer into a validation error and then into a failed request.
+    model_config = ConfigDict(extra="allow")
     verificationResult: Literal["TRUE", "FALSE", "PARTIAL", "UNKNOWN"]
     matchRate: int | None = None
+    lastLocationTime: str | None = None
 
 
 # --- SIM Swap ---
@@ -92,5 +96,33 @@ class CamaraReachabilityRequest(BaseModel):
 
 
 class CamaraReachabilityResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    reachabilityStatus: Literal["CONNECTED_DATA", "CONNECTED_SMS", "NOT_CONNECTED", "UNKNOWN"]
+    """Reachability, as answered by either surface.
+
+    The two disagree on shape. The CAMARA REST spec the mock follows returns a
+    `reachabilityStatus` enum; the live Network as Code gateway returns
+    `{"reachable": true, "connectivity": ["DATA"], ...}`. Both are accepted
+    here, and `is_reachable` is the single answer callers should read, so the
+    difference stops at this boundary instead of leaking into the gateway.
+    """
+
+    model_config = ConfigDict(extra="allow")
+    reachabilityStatus: Literal[
+        "CONNECTED_DATA", "CONNECTED_SMS", "NOT_CONNECTED", "UNKNOWN"
+    ] | None = None
+    reachable: bool | None = None
+    connectivity: list[str] | None = None
+    lastStatusTime: str | None = None
+
+    @property
+    def is_reachable(self) -> bool | None:
+        """True, False, or None when neither surface said anything usable.
+
+        None matters: an unanswered check is not a reachable device, and the
+        policy engine is written to treat missing evidence as missing rather
+        than as a pass.
+        """
+        if self.reachable is not None:
+            return self.reachable
+        if self.reachabilityStatus is None:
+            return None
+        return self.reachabilityStatus in ("CONNECTED_DATA", "CONNECTED_SMS")

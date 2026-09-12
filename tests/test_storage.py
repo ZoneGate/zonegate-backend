@@ -423,10 +423,13 @@ async def test_policy_config_is_absent_until_it_is_saved(memory_store):
 
 
 @pytest.mark.asyncio
-async def test_policy_config_round_trips_with_decimal_precision(memory_store):
+async def test_policy_config_round_trips_with_its_category_map(memory_store):
     await memory_store.save_policy_config(
         PolicyConfig(
-            high_value_threshold=Decimal("123456.78"),
+            restricted_categories={
+                "HAZARDOUS": "ROLE_SAFETY_OFFICER",
+                "WEAPONS": "ROLE_SECURITY_OFFICER",
+            },
             window_start_hour=7,
             window_end_hour=19,
         )
@@ -435,16 +438,17 @@ async def test_policy_config_round_trips_with_decimal_precision(memory_store):
     reread = await memory_store.get_policy_config()
 
     assert reread is not None
-    assert reread.high_value_threshold == Decimal("123456.78")
+    assert reread.authority_for("HAZARDOUS") == "ROLE_SAFETY_OFFICER"
+    assert reread.authority_for("GENERAL") is None
     assert reread.window_start_hour == 7
 
 
 @pytest.mark.asyncio
 async def test_saving_policy_config_twice_keeps_only_the_latest(memory_store):
-    for threshold in ("100000.00", "250000.00"):
+    for authority in ("ROLE_CARGO_SUPERVISOR", "ROLE_SECURITY_OFFICER"):
         await memory_store.save_policy_config(
             PolicyConfig(
-                high_value_threshold=Decimal(threshold),
+                restricted_categories={"HIGH_VALUE": authority},
                 window_start_hour=6,
                 window_end_hour=20,
             )
@@ -453,4 +457,18 @@ async def test_saving_policy_config_twice_keeps_only_the_latest(memory_store):
     reread = await memory_store.get_policy_config()
 
     assert reread is not None
-    assert reread.high_value_threshold == Decimal("250000.00")
+    assert reread.restricted_categories == {"HIGH_VALUE": "ROLE_SECURITY_OFFICER"}
+
+
+@pytest.mark.asyncio
+async def test_a_policy_config_from_before_the_category_map_is_ignored_not_fatal(memory_store):
+    """An existing deployment must not be unable to start after the upgrade."""
+    memory_store._run_sync(
+        lambda: memory_store._db.kv_put(
+            memory_store.NS_INDEXES,
+            memory_store.KEY_POLICY_CONFIG,
+            b'{"high_value_threshold":"100000.00","window_start_hour":6,"window_end_hour":20}',
+        )
+    )
+
+    assert await memory_store.get_policy_config() is None

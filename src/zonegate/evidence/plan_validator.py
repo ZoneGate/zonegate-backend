@@ -1,5 +1,9 @@
+import logging
+
 from zonegate.domain.evidence import EvidenceKind, EvidencePlan, ValidatedEvidencePlan
 from zonegate.evidence.workflow_policy import get_workflow_policy, WorkflowEvidencePolicy
+
+logger = logging.getLogger(__name__)
 
 
 class EvidencePlanValidationError(Exception):
@@ -21,7 +25,17 @@ class EvidencePlanValidator:
     1. Mandatory baseline evidence is always enforced regardless of AI output.
     2. Proposing forbidden evidence immediately fails validation.
     3. AI can only add allowed optional evidence.
+
+    `attestable` narrows the plan to what this deployment's carrier can answer
+    at all. It is not a discretionary setting and the agent has no access to
+    it: a check the carrier cannot answer is dropped from the plan rather than
+    requested and silently missed, and the policy engine is told the same set
+    so the decision states what it could not rest on. Omitting it means every
+    check is available, which is the strictest reading.
     """
+
+    def __init__(self, attestable: frozenset[EvidenceKind] | None = None) -> None:
+        self.attestable = attestable
 
     def validate(
         self,
@@ -53,8 +67,24 @@ class EvidencePlanValidator:
                 if evidence not in validated_optional:
                     validated_optional.append(evidence)
 
-        # Mandatory evidence is always included, never dependent on LLM
-        mandatory_list = sorted(list(policy.mandatory), key=lambda k: k.value)
+        # Mandatory evidence is always included, never dependent on LLM.
+        mandatory = set(policy.mandatory)
+        if self.attestable is not None:
+            unattestable = mandatory - self.attestable
+            if unattestable:
+                # Logged every time, because a deployment quietly collecting
+                # less than its workflow policy demands is worth noticing in
+                # the operator's logs and not only in the decision record.
+                logger.warning(
+                    "Workflow '%s' requires %s, which this carrier cannot attest; "
+                    "dropped from the plan and reported as a caveat on every decision",
+                    workflow_name,
+                    ", ".join(sorted(k.value for k in unattestable)),
+                )
+                mandatory -= unattestable
+            validated_optional = [k for k in validated_optional if k in self.attestable]
+
+        mandatory_list = sorted(mandatory, key=lambda k: k.value)
         combined = list(dict.fromkeys(mandatory_list + validated_optional))
 
         return ValidatedEvidencePlan(

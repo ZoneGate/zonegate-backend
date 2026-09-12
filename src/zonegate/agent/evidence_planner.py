@@ -30,8 +30,8 @@ class EvidencePlanner:
 Evaluate the transaction and determine if any OPTIONAL network evidence should be requested.
 Mandatory evidence is already guaranteed and handled by the system.
 You may ONLY choose from these allowed optional evidence kinds: [{allowed_str}].
-If no additional evidence is necessary (e.g. standard value during business hours), return an empty optional_evidence list.
-If high value, unusual hours, or high risk, select appropriate additional evidence such as SIM_SWAP or DEVICE_SWAP.
+If no additional evidence is necessary (e.g. an unrestricted category during business hours), return an empty optional_evidence list.
+If the cargo category is sensitive, the hour is unusual, or the request otherwise looks risky, select appropriate additional evidence such as SIM_SWAP or DEVICE_SWAP.
 
 Transaction Context:
 - Transaction ID: {transaction.transaction_id}
@@ -39,7 +39,8 @@ Transaction Context:
 - Workflow: {workflow_name}
 - Resource ID: {transaction.resource_id}
 - Zone: {transaction.zone}
-- Value: ${transaction.value}
+- Cargo category: {transaction.category}
+- Declared value: ${transaction.value}
 - Timestamp: {transaction.timestamp.isoformat()}
 - Metadata: {transaction.metadata}
 

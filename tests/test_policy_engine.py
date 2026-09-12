@@ -89,20 +89,21 @@ def test_number_verification_failed_causes_deny(
     assert any("Subscriber number verification failed" in r for r in decision.reasons)
 
 
-def test_high_value_and_outside_expected_window_causes_hold(
+def test_a_release_outside_the_expected_window_causes_hold(
     standard_actor: Actor,
 ):
-    engine = PolicyEngine(high_value_threshold=Decimal("100000.00"))
+    engine = PolicyEngine()
 
-    # $2.8M at 02:15 AM
+    # An unrestricted container, but at 02:15 AM
     night_tx = TransactionRequest(
-        transaction_id="tx_night_high_val",
+        transaction_id="tx_night_release",
         actor_id=standard_actor.actor_id,
         action="RELEASE_CARGO",
         resource_id="cargo_valuable_999",
         zone="ZONE_CARGO_BAY_1",
         timestamp=datetime(2026, 9, 4, 2, 15, tzinfo=timezone.utc),
         value=Decimal("2800000.00"),
+        category="GENERAL",
     )
 
     evidence = CanonicalEvidence(
@@ -120,16 +121,16 @@ def test_high_value_and_outside_expected_window_causes_hold(
 
     assert decision.decision == DecisionOutcome.HOLD
     assert decision.required_authority == "ROLE_CARGO_SUPERVISOR"
-    assert any("outside expected operational window" in r for r in decision.reasons)
+    assert any("outside the expected operational window" in r for r in decision.reasons)
 
 
-def test_recent_sim_swap_and_high_value_causes_hold(
+def test_recent_sim_swap_causes_hold(
     standard_actor: Actor,
 ):
-    engine = PolicyEngine(high_value_threshold=Decimal("50000.00"))
+    engine = PolicyEngine()
 
     tx = TransactionRequest(
-        transaction_id="tx_sim_swap_high_val",
+        transaction_id="tx_sim_swap",
         actor_id=standard_actor.actor_id,
         action="RELEASE_CARGO",
         resource_id="cargo_99",

@@ -60,7 +60,8 @@ You have access to the following Nokia Network as Code MCP tools:
 Transaction Details:
 - Action: {transaction.action}
 - Zone: {transaction.zone}
-- Value: ${transaction.value}
+- Cargo category: {transaction.category}
+- Declared value: ${transaction.value}
 - Timestamp: {transaction.timestamp.isoformat()}
 
 Canonical Evidence so far:
@@ -137,7 +138,8 @@ Transaction Details:
 - Action: {transaction.action}
 - Resource ID: {transaction.resource_id}
 - Zone: {transaction.zone}
-- Value: ${transaction.value}
+- Cargo category: {transaction.category}
+- Declared value: ${transaction.value}
 - Timestamp: {transaction.timestamp.isoformat()}
 - Metadata: {transaction.metadata}
 

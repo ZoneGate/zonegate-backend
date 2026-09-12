@@ -1,8 +1,15 @@
+import asyncio
+import json
+import logging
+from typing import AsyncGenerator
+
 from litestar import Controller, get, post
 from litestar.di import NamedDependency
 from litestar.exceptions import ClientException, NotFoundException
 from litestar.params import FromPath, FromQuery
+from litestar.response import ServerSentEvent, ServerSentEventMessage
 from pydantic import BaseModel, ConfigDict, Field
+from zonegate.authorization.progress import StageEvent
 from zonegate.authorization.service import (
     AuthorizationService,
     DecisionNotFoundError,
@@ -41,8 +48,69 @@ class DecisionContext(BaseModel):
     receipt: Receipt | None = None
 
 
+logger = logging.getLogger(__name__)
+
+
 class AuthorizationController(Controller):
     path = "/v1/authorizations"
+
+    @post("/stream", status_code=200, media_type="text/event-stream")
+    async def stream_authorization(
+        self,
+        data: TransactionRequest,
+        auth_service: NamedDependency[AuthorizationService],
+    ) -> ServerSentEvent:
+        """The same pipeline as POST /v1/authorizations, reported as it runs.
+
+        A release takes six steps against three systems, and a client that can
+        only await the final answer has nothing to show for the wait but a
+        spinner. Each `stage` event here is emitted where the work actually
+        happens; the closing `result` event carries exactly the payload the
+        plain endpoint returns, so a client can use either.
+        """
+        queue: asyncio.Queue[ServerSentEventMessage | None] = asyncio.Queue()
+
+        async def on_stage(event: StageEvent) -> None:
+            await queue.put(
+                ServerSentEventMessage(event="stage", data=event.model_dump_json())
+            )
+
+        async def run() -> None:
+            try:
+                decision, receipt = await auth_service.authorize_transaction(
+                    data, listener=on_stage
+                )
+                payload = AuthorizationResponse(decision=decision, receipt=receipt)
+                await queue.put(
+                    ServerSentEventMessage(event="result", data=payload.model_dump_json())
+                )
+            except Exception as exc:  # noqa: BLE001 - reported to the client, not swallowed
+                logger.exception("Streamed authorization failed for tx=%s", data.transaction_id)
+                await queue.put(
+                    ServerSentEventMessage(
+                        event="error",
+                        data=json.dumps({"detail": str(exc)}),
+                    )
+                )
+            finally:
+                # The sentinel is what ends the stream; without it a client
+                # that lost the pipeline would wait for a message forever.
+                await queue.put(None)
+
+        async def events() -> AsyncGenerator[ServerSentEventMessage, None]:
+            task = asyncio.create_task(run())
+            try:
+                while True:
+                    message = await queue.get()
+                    if message is None:
+                        break
+                    yield message
+            finally:
+                # A client that hangs up mid-pipeline must not leave it running.
+                if not task.done():
+                    task.cancel()
+
+        return ServerSentEvent(events())
 
     @post()
     async def request_authorization(

@@ -378,3 +378,16 @@ def test_two_services_with_different_secrets_do_not_agree():
     b = second.issue_token(**args)
 
     assert a.signature != b.signature
+
+
+def test_every_zone_the_clients_send_is_in_the_registry():
+    """An unlisted zone is checked against DEFAULT_ZONE instead.
+
+    That is not a visible failure -- the carrier answers, and the decision looks
+    normal -- so the only protection is that the zones in use are actually here.
+    """
+    from zonegate.evidence.gateway import DEFAULT_ZONE_REGISTRY
+
+    in_use = {"ZONE_CARGO_BAY_1", "ZONE_PORT_TERMINAL_A", "PORT_GATE_17"}
+
+    assert in_use <= set(DEFAULT_ZONE_REGISTRY)

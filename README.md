@@ -46,6 +46,33 @@ Scoped Authorization Token / Human Authority Transfer
 
 ---
 
+## Deterministic Policy Rules (RELEASE_CARGO)
+
+Evaluated in order; the first rule that fires decides. The agent's advisory
+assessment is attached to the record but never reaches this list.
+
+| # | Condition | Outcome | Authority |
+|---|---|---|---|
+| 1 | Actor lacks `cargo:release` | DENY | — |
+| 2 | Number verification is not `true` | DENY | — |
+| 3 | Location verification is `false` | DENY | — |
+| 4 | Recent SIM swap | HOLD | `ROLE_SECURITY_OFFICER` |
+| 5 | Cargo category is restricted | HOLD | the category's own role |
+| 6 | Outside the operational window | HOLD | `ROLE_CARGO_SUPERVISOR` |
+| 7 | Otherwise | APPROVE | — |
+
+Rule 5 replaced a single monetary threshold: what makes a release sensitive is
+what is in the container, not only what it is worth, and each kind of
+sensitivity answers to a different role. Which categories are restricted, and
+to whom, is configuration (`PUT /v1/policy/config`). Declared value is still
+recorded on every transaction for the audit trail; it no longer decides
+anything on its own.
+
+Rule 2 rejects `null` as well as `false`: evidence that was never collected is
+not evidence that passed.
+
+---
+
 ## Strict Hard Requirements
 
 - **Python 3.14**: Explicitly pinned via `requires-python = "==3.14.*"`.
@@ -56,10 +83,68 @@ Scoped Authorization Token / Human Authority Transfer
 ## Current Integration Status
 
 ### Nokia / CAMARA Integration
-- Standard CAMARA models implemented for Number Verification, Location Verification, SIM Swap, Device Swap, and Device Reachability.
-- `NokiaEvidenceClient` implements async HTTP calls conforming to CAMARA specs using `httpx.AsyncClient`.
+
+There are two carrier surfaces, chosen with `CARRIER_MODE`, and they are not
+interchangeable.
+
+**`CARRIER_MODE=rest` (default)** — `NokiaEvidenceClient` posts CAMARA-shaped
+requests to `NOKIA_BASE_URL`. This is what `scripts/mock_camara.py` serves and
+what a CAMARA-conformant operator endpoint would serve. It is the right choice
+for the demo stack and for offline work.
+
+**`CARRIER_MODE=live`** — `NokiaLiveEvidenceClient` talks to the production
+Nokia Network as Code gateway. That gateway is not plain CAMARA REST: it takes
+JSON-RPC `tools/call` requests at `NOKIA_MCP_URL`, selects the product with an
+`x-api-host` header, and authenticates with `x-api-key` rather than a bearer
+token. The CAMARA operations sit behind tool names, several at a different
+version than the specifications suggest:
+
+| Check | Live tool | Path behind it |
+| --- | --- | --- |
+| Number verification | `phoneNumberVerify-NV-V2` | `/passthrough/camara/v1/number-verification/number-verification/v2/verify` |
+| Location verification | `verifyLocation-LocV-V0` | `/location-verification/v0/verify` |
+| SIM swap | `checkSimSwap` | `/passthrough/camara/v1/sim-swap/sim-swap/v0/check` |
+| Device swap | `checkDeviceSwap` | `/passthrough/camara/v1/device-swap/device-swap/v1/check` |
+| Reachability | `getReachabilityStatus` | `/device-status/device-reachability-status/v1/retrieve` |
+
+Two shapes differ from the specifications and were observed on the live
+gateway: `areaType` is the upper-case enum `CIRCLE`, and reachability answers
+`{"reachable": true, "connectivity": ["DATA"]}` rather than a
+`reachabilityStatus` enum. `CamaraReachabilityResponse.is_reachable` reads
+both, so the difference stops at the integration boundary.
+
+**Live is the default.** `CARRIER_MODE` defaults to `live`, so a clean
+checkout brought up with `docker compose up` collects its evidence from the
+real carrier. The demo operator is seeded on the carrier's own simulator
+subscriber for the same reason: a number the carrier does not know is
+*declined*, not answered, and a mandatory check that comes back unanswered
+denies -- so seeding an arbitrary number would leave a fresh deployment unable
+to release anything. `CARRIER_MODE=rest` switches to the bundled mock, which
+is what the scripted attack scenarios need.
+
+**A declining carrier must not read as a passing one.** The gateway records a
+declined check as not collected, and the policy engine denies when any check
+in the validated plan's mandatory set is missing -- whatever the reason for
+the gap. Without that rule, an unknown subscriber produced an approval resting
+on no network evidence at all.
+
+**Number verification cannot be collected server-side.** CAMARA identifies the
+subscriber from a three-legged token minted over the device's own mobile
+connection, not from the phone number in the request body; called from a
+server the gateway answers `MISSING_IDENTIFIER`. The live client therefore
+declines the check rather than reporting `False`, which would read as the
+carrier denying the number. The Evidence Gateway records it as **not
+collected**, and because Rule 2 refuses to read missing evidence as a pass, a
+check is declared unattestable for this carrier, which does two things: the
+plan validator stops demanding evidence nobody can collect, and every
+decision made without it carries a caveat naming what it does not rest on. It
+is not a rule being switched off -- a carrier that *answers* the check with a
+refusal still denies, and the other four checks are still enforced in full.
+Collecting it for real requires the handset to complete the CAMARA
+authorization flow and pass the resulting token up with the release request.
+
 - In test environments, deterministic test doubles (`FakeNokiaClient`) verify all gateway authorization rules offline without external network dependency.
-- Production deployment requires valid Nokia Network as Code API credentials (`NOKIA_BASE_URL` and `NOKIA_API_KEY`).
+- `tests/test_nokia_live_client.py` pins the live tool names, argument shapes, and real response bodies, so a request shaped for the mock can no longer pass for a request the carrier would accept.
 
 ### Nokia Network as Code MCP Server (Model Context Protocol)
 - Supports the official Nokia RapidAPI Hub MCP server via `mcp-remote`:
@@ -301,12 +386,34 @@ Enforced invariants:
 ### Health
 - `GET /health`: Returns service health and reachability of dependencies (Zova, Ollama, Nokia).
 
+### Console sign-in
+The console is reachable only to somebody already on the enrolled roster; there
+is no registration endpoint and there will not be one. The session lives in an
+httpOnly cookie, so no page script can read it.
+
+- `POST /v1/auth/login`: Signs an enrolled actor in and sets the session cookie.
+- `GET /v1/auth/session`: The signed-in actor, or 401 when nobody is.
+- `POST /v1/auth/logout`: Revokes the session server-side and clears the cookie.
+- `POST /v1/auth/password`: Changes the signed-in actor's own console password.
+
+On a fresh database the auto-seeded demo operator gets `DEMO_OPERATOR_PASSWORD`
+(default `zonegate-demo`), so the sign-in screen is not a dead end.
+
 ### Actors
-- `POST /v1/actors`: Enrolls an actor and binds their device. Required before any request can pass the gateway.
+- `POST /v1/actors`: Enrolls an actor and binds their device. Required before any request can pass the gateway. An optional `password` also gives them console access.
+- `GET /v1/actors`: The enrolled roster with each actor's binding.
 - `GET /v1/actors/{actor_id}`: Retrieves an enrolled actor with their active device binding.
+- `PUT /v1/actors/{actor_id}/permissions`: Replaces an actor's permissions. `expected_permissions` is what the editor was showing; a mismatch is refused with 409 rather than overwriting a concurrent edit.
+
+### Policy
+- `GET /v1/policy/config`: The restricted-category map and operational window the engine is running with.
+- `PUT /v1/policy/config`: Saves both, and rebinds the running engine.
+- `GET /v1/policy/categories`: The cargo categories a request can carry, each marked with the authority it escalates to.
+- `GET /v1/policy/zones`: The geofences the evidence gateway verifies device location against — the same circles the console map draws.
 
 ### Authorizations
 - `POST /v1/authorizations`: Evaluates a transaction request through the full authorization pipeline. Returns the authoritative `PolicyDecision` and an audit `Receipt`.
+- `POST /v1/authorizations/stream`: The same pipeline, reported as it runs. Server-sent events: a `stage` event at each of the six steps (IDENTITY, PLAN, VALIDATE, EVIDENCE, CONTEXT, POLICY) and a closing `result` event carrying exactly the payload the plain endpoint returns. A stage that is skipped says so; the stage that refused a request is the one marked FAILED.
 - `GET /v1/authorizations`: Lists decisions newest first. Supports `?decision=HOLD`, `?pending=true` and `?limit=`.
 - `GET /v1/authorizations/{decision_id}`: Retrieves an existing policy decision record from Zova.
 - `GET /v1/authorizations/{decision_id}/context`: Returns the decision together with the transaction, canonical evidence, evidence plan and receipt behind it.

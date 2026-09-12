@@ -13,18 +13,21 @@ from zonegate.agent.evidence_planner import EvidencePlanner
 from zonegate.agent.gemini import GeminiClient
 from zonegate.agent.ollama import OllamaClient
 from zonegate.api.actors import ActorsController
+from zonegate.api.auth import AuthController
 from zonegate.api.authorization import AuthorizationController
 from zonegate.api.health import health_check
 from zonegate.api.policy import PolicyController
 from zonegate.api.receipts import ReceiptsController
 from zonegate.api.tokens import TokensController
+from zonegate.authorization.console import ConsoleAuthService
 from zonegate.authorization.service import AuthorizationService
 from zonegate.authorization.token import TokenService
 from zonegate.config import Settings, get_settings
 from zonegate.domain.actors import Actor, DeviceBinding
 from zonegate.evidence.gateway import EvidenceGateway
 from zonegate.evidence.plan_validator import EvidencePlanValidator
-from zonegate.integrations.nokia.client import NokiaEvidenceClient
+from zonegate.integrations.nokia.client import NokiaClientProtocol, NokiaEvidenceClient
+from zonegate.integrations.nokia.live import NokiaLiveEvidenceClient
 from zonegate.integrations.nokia.mcp import NokiaMCPClient
 from zonegate.policy.engine import PolicyEngine
 from zonegate.storage.zova import ZoneGateStore
@@ -42,6 +45,14 @@ def provide_llm(state: State) -> LLMClientProtocol:
 
 def provide_auth_service(state: State) -> AuthorizationService:
     return state.auth_service
+
+
+def provide_console_auth(state: State) -> ConsoleAuthService:
+    return state.console_auth
+
+
+def provide_settings(state: State) -> Settings:
+    return state.settings
 
 
 def create_app(settings: Settings | None = None) -> Litestar:
@@ -68,10 +79,30 @@ def create_app(settings: Settings | None = None) -> Litestar:
             )
             logger.info("Using Ollama AI provider at '%s'", cfg.OLLAMA_BASE_URL)
 
-        nokia_client = NokiaEvidenceClient(
-            base_url=cfg.NOKIA_BASE_URL,
-            api_key=cfg.NOKIA_API_KEY,
-        )
+        nokia_client: NokiaClientProtocol
+        if cfg.CARRIER_MODE.lower() == "live":
+            # Refuse to start rather than run on a placeholder. Without a real
+            # key every carrier call is rejected, every mandatory check comes
+            # back unanswered, and the console shows a wall of denials with no
+            # hint that the cause is a missing credential.
+            if not cfg.NOKIA_API_KEY or cfg.NOKIA_API_KEY in {"mock-key", "mock-nokia-api-key"}:
+                raise RuntimeError(
+                    "CARRIER_MODE=live needs a real Nokia Network as Code key in "
+                    "NOKIA_API_KEY. Set one, or use CARRIER_MODE=rest to run "
+                    "against the bundled mock carrier."
+                )
+            nokia_client = NokiaLiveEvidenceClient(
+                api_key=cfg.NOKIA_API_KEY,
+                mcp_url=cfg.NOKIA_MCP_URL,
+                api_host=cfg.NOKIA_API_HOST,
+            )
+            logger.info("Collecting evidence from the live Nokia gateway at '%s'", cfg.NOKIA_MCP_URL)
+        else:
+            nokia_client = NokiaEvidenceClient(
+                base_url=cfg.NOKIA_BASE_URL,
+                api_key=cfg.NOKIA_API_KEY,
+            )
+            logger.info("Collecting evidence over CAMARA REST at '%s'", cfg.NOKIA_BASE_URL)
 
         # Initialize Nokia Network as Code MCP client with static allowlist
         nokia_mcp_client = None
@@ -83,7 +114,7 @@ def create_app(settings: Settings | None = None) -> Litestar:
             )
 
         gateway = EvidenceGateway(nokia_client=nokia_client)
-        plan_validator = EvidencePlanValidator()
+        plan_validator = EvidencePlanValidator(attestable=nokia_client.attestable_kinds)
         stored_policy = await store.get_policy_config()
         policy_engine = PolicyEngine(config=stored_policy)
         token_service = TokenService(secret_key=cfg.TOKEN_SECRET_KEY)
@@ -100,6 +131,10 @@ def create_app(settings: Settings | None = None) -> Litestar:
             context_evaluator=evaluator,
         )
 
+        console_auth = ConsoleAuthService(store=store, session_ttl_hours=cfg.SESSION_TTL_HOURS)
+
+        app.state.settings = cfg
+        app.state.console_auth = console_auth
         app.state.store = store
         app.state.llm_client = llm_client
         app.state.nokia_client = nokia_client
@@ -115,7 +150,12 @@ def create_app(settings: Settings | None = None) -> Litestar:
                 actor_id="usr_cargo_operator_01",
                 role="CARGO_OPERATOR",
                 permissions=["cargo:release", "cargo:inspect"],
-                registered_phone_number="+358501234567",
+                # The carrier's own simulator subscriber. A number the
+                # carrier does not know is declined rather than answered, and
+                # a mandatory check that comes back unanswered denies -- so
+                # seeding an arbitrary number would leave a fresh deployment
+                # unable to release anything against the live gateway.
+                registered_phone_number="+99999991001",
                 registered_device_id="device_cargo_terminal_01",
                 enrollment_status="ACTIVE",
             )
@@ -130,6 +170,21 @@ def create_app(settings: Settings | None = None) -> Litestar:
             await store.save_device_binding(demo_binding)
             logger.info("Auto-seeded default demo actor 'usr_cargo_operator_01' into Zova storage")
 
+        # Checked separately from the actor above: a database that predates
+        # console sign-in already has the demo actor, so seeding the password
+        # only alongside a new actor would leave those deployments with a
+        # sign-in screen nobody can get past.
+        if (
+            cfg.APP_ENV != "test"
+            and cfg.DEMO_OPERATOR_PASSWORD
+            and await store.get_actor("usr_cargo_operator_01") is not None
+            and await store.get_credential("usr_cargo_operator_01") is None
+        ):
+            await console_auth.set_password(
+                "usr_cargo_operator_01", cfg.DEMO_OPERATOR_PASSWORD
+            )
+            logger.info("Seeded a console password for the demo operator")
+
         try:
             yield
         finally:
@@ -141,6 +196,10 @@ def create_app(settings: Settings | None = None) -> Litestar:
         allow_origins=[origin.strip() for origin in cfg.CORS_ALLOW_ORIGINS.split(",") if origin.strip()],
         allow_methods=["GET", "POST", "PUT", "OPTIONS"],
         allow_headers=["Content-Type"],
+        # The console session is a cookie, so a cross-origin console has to be
+        # allowed to send it. Same-origin deployments go through the site's own
+        # proxy and never reach this.
+        allow_credentials=True,
     )
 
     logging_config = LoggingConfig(
@@ -157,6 +216,7 @@ def create_app(settings: Settings | None = None) -> Litestar:
         route_handlers=[
             health_check,
             ActorsController,
+            AuthController,
             AuthorizationController,
             PolicyController,
             ReceiptsController,
@@ -167,6 +227,8 @@ def create_app(settings: Settings | None = None) -> Litestar:
             "store": Provide(provide_store, sync_to_thread=False),
             "llm_client": Provide(provide_llm, sync_to_thread=False),
             "auth_service": Provide(provide_auth_service, sync_to_thread=False),
+            "console_auth": Provide(provide_console_auth, sync_to_thread=False),
+            "settings": Provide(provide_settings, sync_to_thread=False),
         },
         lifespan=[lifespan],
         logging_config=logging_config,

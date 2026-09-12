@@ -27,9 +27,21 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-3.6-flash"
 
+    # Which carrier the Evidence Gateway actually calls.
+    #   "rest" - CAMARA REST at NOKIA_BASE_URL (the bundled mock, or a
+    #            conformant operator endpoint)
+    #   "live" - the Nokia Network as Code MCP gateway, using NOKIA_API_KEY
+    # Defaults to "live": a clean checkout collects real carrier evidence.
+    CARRIER_MODE: str = "live"
+
     # Nokia / CAMARA Gateway Configuration
     NOKIA_BASE_URL: str = "https://api.nokia.example.com"
     NOKIA_API_KEY: str = "mock-key"
+
+    # The live Network as Code gateway. The key is sent as `x-api-key` and the
+    # product is selected with `x-api-host`; neither is a bearer token.
+    NOKIA_MCP_URL: str = "https://mcp.prodeu.apihub.nokia.io"
+    NOKIA_API_HOST: str = "network-as-code.nokia.rapidapi.com"
 
     # Nokia Network as Code MCP Configuration
     NOKIA_MCP_ENABLED: bool = True
@@ -41,6 +53,15 @@ class Settings(BaseSettings):
 
     # Token Service Configuration
     TOKEN_SECRET_KEY: str = "zonegate-token-secret-key-initial-scaffold"
+
+    # Console sign-in
+    SESSION_TTL_HOURS: int = 12
+    # A Secure cookie is never sent back over plain http, which is what a demo
+    # machine serves; turn this on wherever the console is behind TLS.
+    SESSION_COOKIE_SECURE: bool = False
+    # Password given to the auto-seeded demo operator on a fresh database.
+    # Blank leaves the demo actor unable to sign in to the console.
+    DEMO_OPERATOR_PASSWORD: str = "zonegate-demo"
 
     # Browser origins permitted to call the API (comma separated)
     CORS_ALLOW_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
