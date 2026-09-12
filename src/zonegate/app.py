@@ -104,7 +104,7 @@ def create_app(settings: Settings | None = None) -> Litestar:
             )
 
         gateway = EvidenceGateway(nokia_client=nokia_client)
-        plan_validator = EvidencePlanValidator()
+        plan_validator = EvidencePlanValidator(attestable=nokia_client.attestable_kinds)
         stored_policy = await store.get_policy_config()
         policy_engine = PolicyEngine(config=stored_policy)
         token_service = TokenService(secret_key=cfg.TOKEN_SECRET_KEY)
@@ -140,7 +140,12 @@ def create_app(settings: Settings | None = None) -> Litestar:
                 actor_id="usr_cargo_operator_01",
                 role="CARGO_OPERATOR",
                 permissions=["cargo:release", "cargo:inspect"],
-                registered_phone_number="+358501234567",
+                # The carrier's own simulator subscriber. A number the
+                # carrier does not know is declined rather than answered, and
+                # a mandatory check that comes back unanswered denies -- so
+                # seeding an arbitrary number would leave a fresh deployment
+                # unable to release anything against the live gateway.
+                registered_phone_number="+99999991001",
                 registered_device_id="device_cargo_terminal_01",
                 enrollment_status="ACTIVE",
             )

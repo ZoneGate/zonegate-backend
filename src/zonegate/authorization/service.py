@@ -458,6 +458,14 @@ class AuthorizationService:
             actor=actor,
             evidence=canonical_evidence,
             context_evaluation=context_evaluation,
+            # The same set the plan was validated against, so a check that was
+            # never collectible is not then treated as a check that went
+            # missing -- and the decision says which one it was.
+            attestable=self.validator.attestable,
+            # The plan's own mandatory set. A check this release was not
+            # entitled to proceed without, and which the carrier did not
+            # answer, denies -- rather than passing for want of a value.
+            required=frozenset(validated_plan.mandatory),
         )
 
         await emit(

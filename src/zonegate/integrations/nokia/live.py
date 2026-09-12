@@ -20,6 +20,7 @@ from typing import Any
 
 import httpx
 
+from zonegate.domain.evidence import EvidenceKind
 from zonegate.integrations.nokia.models import (
     CamaraDeviceSwapResponse,
     CamaraLocationVerificationResponse,
@@ -132,6 +133,18 @@ class NokiaLiveEvidenceClient:
             )
 
         return payload
+
+    @property
+    def attestable_kinds(self) -> frozenset[EvidenceKind]:
+        """What this carrier can answer at all.
+
+        Number verification is absent because no server-side call can obtain
+        it, not because it is unimportant. Declaring that up front lets the
+        plan validator stop demanding a check nobody can collect and lets the
+        decision say what it is missing, instead of every release failing on
+        evidence the deployment was never able to gather.
+        """
+        return frozenset(EvidenceKind) - {EvidenceKind.NUMBER_VERIFICATION}
 
     async def verify_number(self, phone_number: str) -> CamaraNumberVerificationResponse:
         raise CarrierCapabilityUnavailableError(

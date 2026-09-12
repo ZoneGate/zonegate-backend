@@ -31,8 +31,8 @@ class Settings(BaseSettings):
     #   "rest" - CAMARA REST at NOKIA_BASE_URL (the bundled mock, or a
     #            conformant operator endpoint)
     #   "live" - the Nokia Network as Code MCP gateway, using NOKIA_API_KEY
-    # Defaults to "rest" so a machine with no carrier subscription still runs.
-    CARRIER_MODE: str = "rest"
+    # Defaults to "live": a clean checkout collects real carrier evidence.
+    CARRIER_MODE: str = "live"
 
     # Nokia / CAMARA Gateway Configuration
     NOKIA_BASE_URL: str = "https://api.nokia.example.com"

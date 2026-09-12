@@ -113,6 +113,21 @@ gateway: `areaType` is the upper-case enum `CIRCLE`, and reachability answers
 `reachabilityStatus` enum. `CamaraReachabilityResponse.is_reachable` reads
 both, so the difference stops at the integration boundary.
 
+**Live is the default.** `CARRIER_MODE` defaults to `live`, so a clean
+checkout brought up with `docker compose up` collects its evidence from the
+real carrier. The demo operator is seeded on the carrier's own simulator
+subscriber for the same reason: a number the carrier does not know is
+*declined*, not answered, and a mandatory check that comes back unanswered
+denies -- so seeding an arbitrary number would leave a fresh deployment unable
+to release anything. `CARRIER_MODE=rest` switches to the bundled mock, which
+is what the scripted attack scenarios need.
+
+**A declining carrier must not read as a passing one.** The gateway records a
+declined check as not collected, and the policy engine denies when any check
+in the validated plan's mandatory set is missing -- whatever the reason for
+the gap. Without that rule, an unknown subscriber produced an approval resting
+on no network evidence at all.
+
 **Number verification cannot be collected server-side.** CAMARA identifies the
 subscriber from a three-legged token minted over the device's own mobile
 connection, not from the phone number in the request body; called from a
@@ -120,8 +135,12 @@ server the gateway answers `MISSING_IDENTIFIER`. The live client therefore
 declines the check rather than reporting `False`, which would read as the
 carrier denying the number. The Evidence Gateway records it as **not
 collected**, and because Rule 2 refuses to read missing evidence as a pass, a
-live-mode release is denied with a reason that says the check was never
-answered. Collecting it for real requires the handset to complete the CAMARA
+check is declared unattestable for this carrier, which does two things: the
+plan validator stops demanding evidence nobody can collect, and every
+decision made without it carries a caveat naming what it does not rest on. It
+is not a rule being switched off -- a carrier that *answers* the check with a
+refusal still denies, and the other four checks are still enforced in full.
+Collecting it for real requires the handset to complete the CAMARA
 authorization flow and pass the resulting token up with the release request.
 
 - In test environments, deterministic test doubles (`FakeNokiaClient`) verify all gateway authorization rules offline without external network dependency.
