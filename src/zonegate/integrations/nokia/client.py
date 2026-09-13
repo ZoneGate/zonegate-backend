@@ -56,12 +56,12 @@ class NokiaClientProtocol(Protocol):
 class NokiaEvidenceClient:
     """A CAMARA-shaped REST client, pointed at a base URL.
 
-    This is what the bundled mock carrier serves and what a CAMARA-conformant
-    operator endpoint would serve. It is **not** the Nokia Network as Code
-    production gateway: that gateway exposes these capabilities as MCP tools
-    at different paths and versions and authenticates with `x-api-key`, so
-    these requests do not reach it. Use `NokiaLiveEvidenceClient` for the real
-    carrier and keep this one for the mock and for local CAMARA endpoints.
+    This is what a CAMARA-conformant operator endpoint serves. It is **not**
+    the Nokia Network as Code production gateway: that gateway exposes these
+    capabilities as MCP tools at different paths and versions and
+    authenticates with `x-api-key`, so these requests do not reach it. Use
+    `NokiaLiveEvidenceClient` for Nokia and keep this one for carriers that
+    expose CAMARA REST directly.
     """
 
     def __init__(

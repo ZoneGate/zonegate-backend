@@ -98,8 +98,9 @@ def create_app(settings: Settings | None = None) -> Litestar:
             if not cfg.NOKIA_API_KEY or cfg.NOKIA_API_KEY in {"mock-key", "mock-nokia-api-key"}:
                 raise RuntimeError(
                     "CARRIER_MODE=live needs a real Nokia Network as Code key in "
-                    "NOKIA_API_KEY. Set one, or use CARRIER_MODE=rest to run "
-                    "against the bundled mock carrier."
+                    "NOKIA_API_KEY (CARRIER_KEY under Docker Compose). Set one, or use "
+                    "CARRIER_MODE=rest with NOKIA_BASE_URL pointing at a CAMARA-conformant "
+                    "operator endpoint."
                 )
             nokia_client = NokiaLiveEvidenceClient(
                 api_key=cfg.NOKIA_API_KEY,

@@ -87,10 +87,8 @@ not evidence that passed.
 There are two carrier surfaces, chosen with `CARRIER_MODE`, and they are not
 interchangeable.
 
-**`CARRIER_MODE=rest` (default)** — `NokiaEvidenceClient` posts CAMARA-shaped
-requests to `NOKIA_BASE_URL`. This is what `scripts/mock_camara.py` serves and
-what a CAMARA-conformant operator endpoint would serve. It is the right choice
-for the demo stack and for offline work.
+**`CARRIER_MODE=rest`** — `NokiaEvidenceClient` posts CAMARA-shaped requests to
+`NOKIA_BASE_URL`, for a carrier that exposes the CAMARA REST APIs directly.
 
 **`CARRIER_MODE=live`** — `NokiaLiveEvidenceClient` talks to the production
 Nokia Network as Code gateway. That gateway is not plain CAMARA REST: it takes
@@ -119,8 +117,8 @@ real carrier. The demo operator is seeded on the carrier's own simulator
 subscriber for the same reason: a number the carrier does not know is
 *declined*, not answered, and a mandatory check that comes back unanswered
 denies -- so seeding an arbitrary number would leave a fresh deployment unable
-to release anything. `CARRIER_MODE=rest` switches to the bundled mock, which
-is what the scripted attack scenarios need.
+to release anything. No carrier is simulated inside the project: every
+decision rests on what the carrier itself answered.
 
 **A declining carrier must not read as a passing one.** The gateway records a
 declined check as not collected, and the policy engine denies when any check
@@ -252,15 +250,13 @@ curl http://127.0.0.1:8000/health
 
 ### 7. Run with Docker Compose
 
-Docker is the only prerequisite. Compose brings up the API together with the
-mock carrier it needs:
+Docker is the only prerequisite:
 
 ```bash
 docker compose up --build -d
 ```
 
 - API — <http://127.0.0.1:8000>
-- Mock carrier — `127.0.0.1:8899`
 
 ```bash
 docker compose logs -f zonegate    # follow the pipeline
@@ -279,10 +275,10 @@ literally in `docker-compose.yml` where that file cannot reach it. Getting this
 wrong is not a visible failure: the gateway ends up pointed at a domain that
 does not resolve and **every decision comes back DENY** on a carrier error.
 
-To decide on a real carrier instead of the mock:
+For a carrier that exposes CAMARA REST directly rather than Network as Code:
 
 ```bash
-CARRIER_URL=https://your-carrier.example.com CARRIER_KEY=... docker compose up -d
+CARRIER_MODE=rest CARRIER_URL=https://your-carrier.example.com CARRIER_KEY=... docker compose up -d
 ```
 
 **Evaluating with your own Nokia key.** No key ships with the project. Live mode
@@ -335,27 +331,7 @@ docker compose run --rm zonegate python scripts/seed.py
 docker compose start zonegate
 ```
 
-### 2. Drive a scenario
-
-The mock carrier runs as a compose service and needs no separate start.
-
-The mock listens on `8899` (override with `MOCK_CAMARA_PORT`) and reads its
-scenario from `scripts/camara_state.json`. Edit that file between requests to
-drive a specific outcome — setting `"location_verified": false` turns the next
-release request into the blocked presence-attack case:
-
-```json
-{"number_verified": true, "location_verified": false, "sim_swapped": false,
- "device_swapped": false, "reachability": "CONNECTED_DATA"}
-```
-
-Stage a scenario by editing `scripts/camara_state.json` while it runs:
-
-```json
-{"location_verified": false}
-```
-
-### 3. Start the dashboard
+### 2. Start the dashboard
 
 ```bash
 cd ../zonegate-website/zonegate-web
