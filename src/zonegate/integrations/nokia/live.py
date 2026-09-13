@@ -1,12 +1,12 @@
 """The Nokia Network as Code gateway as it actually answers.
 
-`NokiaEvidenceClient` speaks plain CAMARA REST against a base URL, which is
-what the bundled mock serves. The production gateway is not that: the only
+`NokiaEvidenceClient` speaks plain CAMARA REST against a base URL. The
+production gateway is not that: the only
 reachable surface for this subscription is the Network as Code MCP endpoint,
 which takes JSON-RPC `tools/call` requests and identifies the caller with
 `x-api-key` / `x-api-host` headers rather than a bearer token. The CAMARA
 paths sit behind tool names, several of them at a different version than the
-REST client assumed, so a request shaped for the mock never reaches the real
+REST client assumed, so a request shaped for plain CAMARA REST never reaches the real
 carrier at all.
 
 Every tool name and payload below was read off `tools/list` on the live

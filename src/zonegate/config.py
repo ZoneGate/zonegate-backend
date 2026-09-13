@@ -28,8 +28,8 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-3.6-flash"
 
     # Which carrier the Evidence Gateway actually calls.
-    #   "rest" - CAMARA REST at NOKIA_BASE_URL (the bundled mock, or a
-    #            conformant operator endpoint)
+    #   "rest" - CAMARA REST at NOKIA_BASE_URL, a conformant operator
+    #            endpoint
     #   "live" - the Nokia Network as Code MCP gateway, using NOKIA_API_KEY
     # Defaults to "live": a clean checkout collects real carrier evidence.
     CARRIER_MODE: str = "live"
