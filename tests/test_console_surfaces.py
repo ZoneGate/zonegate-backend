@@ -264,8 +264,6 @@ async def test_a_category_configured_outside_the_built_in_vocabulary_is_still_li
             "/v1/policy/config",
             json={
                 "restricted_categories": {"LIVESTOCK": "ROLE_VETERINARY_LEAD"},
-                "window_start_hour": 6,
-                "window_end_hour": 20,
             },
         )
 

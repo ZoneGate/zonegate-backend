@@ -77,7 +77,7 @@ async def seed_actor(store) -> Actor:
     return actor
 
 
-def tx(transaction_id: str, value: str, hour: int) -> TransactionRequest:
+def tx(transaction_id: str, value: str, hour: int, category: str = "GENERAL") -> TransactionRequest:
     return TransactionRequest(
         transaction_id=transaction_id,
         actor_id="usr_cargo_operator_01",
@@ -86,6 +86,7 @@ def tx(transaction_id: str, value: str, hour: int) -> TransactionRequest:
         zone="PORT_GATE_17",
         timestamp=datetime(2026, 9, 10, hour, 30, tzinfo=timezone.utc),
         value=Decimal(value),
+        category=category,
     )
 
 
@@ -101,7 +102,7 @@ async def test_resolving_a_hold_records_the_verdict_without_rewriting_the_engine
     service = build_service(memory_store, fake_nokia_client)
     await seed_actor(memory_store)
 
-    held, _ = await service.authorize_transaction(tx("tx_hold_1", "250000.00", 3))
+    held, _ = await service.authorize_transaction(tx("tx_hold_1", "250000.00", 3, "HIGH_VALUE"))
     assert held.decision == DecisionOutcome.HOLD
 
     resolved, receipt = await service.resolve_hold(
@@ -127,7 +128,7 @@ async def test_the_resolution_records_the_authority_the_engine_demanded(
     service = build_service(memory_store, fake_nokia_client)
     await seed_actor(memory_store)
 
-    held, _ = await service.authorize_transaction(tx("tx_hold_2", "250000.00", 3))
+    held, _ = await service.authorize_transaction(tx("tx_hold_2", "250000.00", 3, "HIGH_VALUE"))
 
     resolved, _ = await service.resolve_hold(
         decision_id=held.decision_id,
@@ -145,7 +146,7 @@ async def test_a_human_deny_issues_no_token(memory_store, fake_nokia_client):
     service = build_service(memory_store, fake_nokia_client)
     await seed_actor(memory_store)
 
-    held, _ = await service.authorize_transaction(tx("tx_hold_3", "250000.00", 3))
+    held, _ = await service.authorize_transaction(tx("tx_hold_3", "250000.00", 3, "HIGH_VALUE"))
 
     resolved, receipt = await service.resolve_hold(
         decision_id=held.decision_id,
@@ -205,7 +206,7 @@ async def test_a_hold_cannot_be_decided_twice(memory_store, fake_nokia_client):
     service = build_service(memory_store, fake_nokia_client)
     await seed_actor(memory_store)
 
-    held, _ = await service.authorize_transaction(tx("tx_hold_4", "250000.00", 3))
+    held, _ = await service.authorize_transaction(tx("tx_hold_4", "250000.00", 3, "HIGH_VALUE"))
 
     await service.resolve_hold(
         decision_id=held.decision_id,
@@ -229,7 +230,7 @@ async def test_a_human_may_not_answer_hold(memory_store, fake_nokia_client):
     service = build_service(memory_store, fake_nokia_client)
     await seed_actor(memory_store)
 
-    held, _ = await service.authorize_transaction(tx("tx_hold_5", "250000.00", 3))
+    held, _ = await service.authorize_transaction(tx("tx_hold_5", "250000.00", 3, "HIGH_VALUE"))
 
     with pytest.raises(HoldResolutionError) as raised:
         await service.resolve_hold(
@@ -263,7 +264,7 @@ async def test_the_issued_token_is_scoped_to_the_held_transaction(
     service = build_service(memory_store, fake_nokia_client)
     await seed_actor(memory_store)
 
-    held, _ = await service.authorize_transaction(tx("tx_hold_6", "250000.00", 3))
+    held, _ = await service.authorize_transaction(tx("tx_hold_6", "250000.00", 3, "HIGH_VALUE"))
 
     _, receipt = await service.resolve_hold(
         decision_id=held.decision_id,
@@ -284,7 +285,7 @@ async def test_the_resolution_is_durable_across_a_reread(
     service = build_service(memory_store, fake_nokia_client)
     await seed_actor(memory_store)
 
-    held, _ = await service.authorize_transaction(tx("tx_hold_7", "250000.00", 3))
+    held, _ = await service.authorize_transaction(tx("tx_hold_7", "250000.00", 3, "HIGH_VALUE"))
     await service.resolve_hold(
         decision_id=held.decision_id,
         outcome=DecisionOutcome.APPROVE,
@@ -307,8 +308,8 @@ async def test_a_resolved_hold_leaves_the_pending_queue(
     service = build_service(memory_store, fake_nokia_client)
     await seed_actor(memory_store)
 
-    first, _ = await service.authorize_transaction(tx("tx_hold_8", "250000.00", 3))
-    second, _ = await service.authorize_transaction(tx("tx_hold_9", "300000.00", 4))
+    first, _ = await service.authorize_transaction(tx("tx_hold_8", "250000.00", 3, "HIGH_VALUE"))
+    second, _ = await service.authorize_transaction(tx("tx_hold_9", "300000.00", 4, "HIGH_VALUE"))
 
     holds = await memory_store.list_decisions(outcome="HOLD", limit=100)
     pending = [d for d in holds if d.resolution is None]

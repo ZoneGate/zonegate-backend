@@ -15,9 +15,6 @@ ACTION_PERMISSIONS: dict[str, str] = {
     "RELEASE_CARGO": "cargo:release",
 }
 
-# The role an out-of-hours release answers to when its category is otherwise
-# unrestricted. Restricted categories name their own authority in the config.
-OFF_HOURS_AUTHORITY = "ROLE_CARGO_SUPERVISOR"
 SIM_SWAP_AUTHORITY = "ROLE_SECURITY_OFFICER"
 
 # Which field on the canonical evidence each planned check lands in, so the
@@ -50,13 +47,6 @@ class PolicyEngine:
 
     def __init__(self, config: PolicyConfig | None = None) -> None:
         self.config = config or PolicyConfig()
-
-    def is_outside_expected_window(self, timestamp: datetime) -> bool:
-        """Whether the timestamp falls outside the configured operational window."""
-        return (
-            timestamp.hour < self.config.window_start_hour
-            or timestamp.hour >= self.config.window_end_hour
-        )
 
     def evaluate(
         self,
@@ -205,17 +195,11 @@ class PolicyEngine:
                 restricted_authority,
             )
 
-        # Rule 6: Outside the expected operational window -> HOLD
-        if self.is_outside_expected_window(transaction.timestamp):
-            return outcome(
-                DecisionOutcome.HOLD,
-                f"Release requested at {transaction.timestamp.strftime('%H:%M')} UTC, outside the "
-                f"expected operational window "
-                f"({self.config.window_start_hour:02d}:00-{self.config.window_end_hour:02d}:00 UTC)",
-                OFF_HOURS_AUTHORITY,
-            )
-
-        # Rule 7: Otherwise -> APPROVE.
+        # Rule 6: Otherwise -> APPROVE.
+        # There is no operational window: the hour a release is requested at
+        # does not hold it. Ports and warehouses run around the clock, and a
+        # rule that held every night-shift release sent the supervisor a queue
+        # of requests the evidence had already cleared.
         # The reason names the checks that actually passed rather than
         # claiming "all verifications passed". Written the old way, an
         # approval resting on one carrier answer still read as a full identity

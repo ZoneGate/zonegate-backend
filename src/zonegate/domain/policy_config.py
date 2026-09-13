@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 #: The cargo categories the console offers. A request carries exactly one.
 #:
@@ -14,6 +14,11 @@ CARGO_CATEGORIES: tuple[str, ...] = (
 )
 
 DEFAULT_CATEGORY = "GENERAL"
+
+#: Fields an older configuration may still carry. The operational window was
+#: removed -- a release is no longer held for the hour it is requested at -- but
+#: a config saved while it existed stores both hours next to its category map.
+RETIRED_FIELDS: frozenset[str] = frozenset({"window_start_hour", "window_end_hour"})
 
 #: Categories that may not be released on the engine's own authority, and the
 #: role each one is handed to. A category absent from this map releases
@@ -44,18 +49,15 @@ class PolicyConfig(BaseModel):
         default_factory=lambda: dict(DEFAULT_RESTRICTED_CATEGORIES),
         description="Cargo category -> the authority role that must approve it",
     )
-    window_start_hour: int = Field(
-        default=6,
-        ge=0,
-        le=23,
-        description="First hour (UTC) of the expected operational window",
-    )
-    window_end_hour: int = Field(
-        default=20,
-        ge=1,
-        le=24,
-        description="Hour (UTC) the expected operational window closes",
-    )
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_fields(cls, data: object) -> object:
+        # Refusing a config for carrying the old window would throw away the
+        # category map saved alongside it, and a console built before the
+        # change would be unable to save at all.
+        if isinstance(data, dict):
+            return {key: value for key, value in data.items() if key not in RETIRED_FIELDS}
+        return data
 
     @field_validator("restricted_categories")
     @classmethod
@@ -69,10 +71,6 @@ class PolicyConfig(BaseModel):
                     "A category with nobody to escalate to would silently release."
                 )
         return {category.strip(): authority.strip() for category, authority in value.items()}
-
-    def model_post_init(self, _context: object) -> None:
-        if self.window_end_hour <= self.window_start_hour:
-            raise ValueError("window_end_hour must be later than window_start_hour")
 
     def authority_for(self, category: str) -> str | None:
         """The role a category must be escalated to, or None if it is unrestricted."""

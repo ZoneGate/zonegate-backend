@@ -89,7 +89,7 @@ def test_number_verification_failed_causes_deny(
     assert any("Subscriber number verification failed" in r for r in decision.reasons)
 
 
-def test_a_release_outside_the_expected_window_causes_hold(
+def test_a_night_release_of_unrestricted_cargo_is_not_held_for_the_hour(
     standard_actor: Actor,
 ):
     engine = PolicyEngine()
@@ -119,9 +119,9 @@ def test_a_release_outside_the_expected_window_causes_hold(
         evidence=evidence,
     )
 
-    assert decision.decision == DecisionOutcome.HOLD
-    assert decision.required_authority == "ROLE_CARGO_SUPERVISOR"
-    assert any("outside the expected operational window" in r for r in decision.reasons)
+    assert decision.decision == DecisionOutcome.APPROVE
+    assert decision.required_authority is None
+    assert not any("window" in r for r in decision.reasons)
 
 
 def test_recent_sim_swap_causes_hold(

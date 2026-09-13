@@ -309,7 +309,7 @@ async def test_listing_filters_by_outcome():
         await client.post("/v1/authorizations", json=transaction_payload("tx_ok"))
         await client.post(
             "/v1/authorizations",
-            json=transaction_payload("tx_held", value="250000.00", hour=3),
+            json=transaction_payload("tx_held", category="HIGH_VALUE"),
         )
 
         holds = (await client.get("/v1/authorizations?decision=HOLD")).json()
@@ -330,7 +330,7 @@ async def test_pending_filter_excludes_a_hold_once_it_is_resolved():
         held = (
             await client.post(
                 "/v1/authorizations",
-                json=transaction_payload("tx_pending", value="250000.00", hour=3),
+                json=transaction_payload("tx_pending", category="HIGH_VALUE"),
             )
         ).json()["decision"]
 
@@ -451,7 +451,7 @@ async def test_bulk_contexts_honour_the_same_filters_as_the_plain_listing():
         await client.post("/v1/authorizations", json=transaction_payload("tx_c_ok"))
         await client.post(
             "/v1/authorizations",
-            json=transaction_payload("tx_c_hold", value="250000.00", hour=3),
+            json=transaction_payload("tx_c_hold", category="HIGH_VALUE"),
         )
 
         holds = (
@@ -479,7 +479,7 @@ async def test_resolving_a_hold_over_http_returns_the_updated_record():
         held = (
             await client.post(
                 "/v1/authorizations",
-                json=transaction_payload("tx_http_hold", value="250000.00", hour=3),
+                json=transaction_payload("tx_http_hold", category="HIGH_VALUE"),
             )
         ).json()["decision"]
 
@@ -550,7 +550,7 @@ async def test_resolution_rejects_an_unknown_outcome():
         held = (
             await client.post(
                 "/v1/authorizations",
-                json=transaction_payload("tx_bad_outcome", value="250000.00", hour=3),
+                json=transaction_payload("tx_bad_outcome", category="HIGH_VALUE"),
             )
         ).json()["decision"]
 
@@ -568,7 +568,8 @@ async def test_resolution_rejects_an_unknown_outcome():
 
 
 @pytest.mark.asyncio
-async def test_policy_config_rejects_an_hour_outside_the_clock():
+async def test_policy_config_ignores_the_retired_window_fields():
+    """A console built before the window was removed must still be able to save."""
     app = create_app(settings())
 
     async with AsyncTestClient(app=app) as client:
@@ -582,7 +583,8 @@ async def test_policy_config_rejects_an_hour_outside_the_clock():
             },
         )
 
-        assert response.status_code >= 400
+        assert response.status_code == 200
+        assert response.json() == {"restricted_categories": {"WEAPONS": "ROLE_SECURITY_OFFICER"}}
 
 
 @pytest.mark.asyncio
@@ -596,8 +598,6 @@ async def test_policy_config_rejects_a_restricted_category_with_no_authority():
             "/v1/policy/config",
             json={
                 "restricted_categories": {"WEAPONS": ""},
-                "window_start_hour": 6,
-                "window_end_hour": 20,
             },
         )
 
@@ -627,8 +627,6 @@ async def test_a_saved_category_map_changes_the_next_decision_over_http():
             "/v1/policy/config",
             json={
                 "restricted_categories": {"WEAPONS": "ROLE_SECURITY_OFFICER"},
-                "window_start_hour": 6,
-                "window_end_hour": 20,
             },
         )
 
@@ -655,7 +653,7 @@ async def test_retuning_policy_does_not_rewrite_decisions_already_recorded():
         held = (
             await client.post(
                 "/v1/authorizations",
-                json=transaction_payload("tx_frozen", value="150000.00", hour=3),
+                json=transaction_payload("tx_frozen", category="HIGH_VALUE"),
             )
         ).json()["decision"]
 
@@ -663,8 +661,6 @@ async def test_retuning_policy_does_not_rewrite_decisions_already_recorded():
             "/v1/policy/config",
             json={
                 "restricted_categories": {},
-                "window_start_hour": 0,
-                "window_end_hour": 24,
             },
         )
 

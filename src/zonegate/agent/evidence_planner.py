@@ -30,8 +30,8 @@ class EvidencePlanner:
 Evaluate the transaction and determine if any OPTIONAL network evidence should be requested.
 Mandatory evidence is already guaranteed and handled by the system.
 You may ONLY choose from these allowed optional evidence kinds: [{allowed_str}].
-If no additional evidence is necessary (e.g. an unrestricted category during business hours), return an empty optional_evidence list.
-If the cargo category is sensitive, the hour is unusual, or the request otherwise looks risky, select appropriate additional evidence such as SIM_SWAP or DEVICE_SWAP.
+If no additional evidence is necessary (e.g. an unrestricted category with nothing unusual in the request), return an empty optional_evidence list.
+If the cargo category is sensitive or the request otherwise looks risky, select appropriate additional evidence such as SIM_SWAP or DEVICE_SWAP.
 If several of those risk signals appear together (for example a restricted category with a very high declared value, or metadata reporting a changed phone or SIM, a broken seal, an unknown consignee or an operator who cannot be reached), the release is high risk: request every allowed optional evidence kind, including REACHABILITY, so the decision rests on everything the carrier can attest.
 
 Transaction Context:

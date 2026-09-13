@@ -108,7 +108,7 @@ def standard_transaction(standard_actor: Actor) -> TransactionRequest:
         action="RELEASE_CARGO",
         resource_id="cargo_container_99",
         zone="ZONE_CARGO_BAY_1",
-        timestamp=datetime(2026, 9, 4, 14, 30, tzinfo=timezone.utc),  # 14:30 UTC = business hours
+        timestamp=datetime(2026, 9, 4, 14, 30, tzinfo=timezone.utc),  # 14:30 UTC
         value=Decimal("15000.00"),
         metadata={"shipping_line": "Maersk"},
     )

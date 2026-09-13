@@ -59,7 +59,7 @@ async def enrol_operator(store, password: str | None = "field-operator-1") -> Ac
 
 
 async def held_for_supervisor(client, app) -> dict:
-    """A GENERAL release at 03:30 UTC: held for ROLE_CARGO_SUPERVISOR."""
+    """A HIGH_VALUE release: held for ROLE_CARGO_SUPERVISOR."""
     install_fake_nokia(app, FakeNokiaClient())
     await enrol_operator(app.state.store, password=None)
     decision = (
@@ -73,7 +73,7 @@ async def held_for_supervisor(client, app) -> dict:
                 "zone": "PORT_GATE_17",
                 "timestamp": "2026-09-10T03:30:00Z",
                 "value": "15000.00",
-                "category": "GENERAL",
+                "category": "HIGH_VALUE",
             },
         )
     ).json()["decision"]
@@ -193,7 +193,7 @@ async def test_console_actions_need_a_signed_in_authority():
 
         config = await client.put(
             "/v1/policy/config",
-            json={"restricted_categories": {}, "window_start_hour": 0, "window_end_hour": 24},
+            json={"restricted_categories": {}},
         )
         enrolment = await client.post(
             "/v1/actors",
