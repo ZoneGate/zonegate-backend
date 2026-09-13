@@ -58,15 +58,15 @@ assessment is attached to the record but never reaches this list.
 | 3 | Location verification is `false` | DENY | — |
 | 4 | Recent SIM swap | HOLD | `ROLE_SECURITY_OFFICER` |
 | 5 | Cargo category is restricted | HOLD | the category's own role |
-| 6 | Outside the operational window | HOLD | `ROLE_CARGO_SUPERVISOR` |
-| 7 | Otherwise | APPROVE | — |
+| 6 | Otherwise | APPROVE | — |
 
 Rule 5 replaced a single monetary threshold: what makes a release sensitive is
 what is in the container, not only what it is worth, and each kind of
 sensitivity answers to a different role. Which categories are restricted, and
 to whom, is configuration (`PUT /v1/policy/config`). Declared value is still
 recorded on every transaction for the audit trail; it no longer decides
-anything on its own.
+anything on its own. The hour a release is requested at does not decide
+anything either: there is no operational window.
 
 Rule 2 rejects `null` as well as `false`: evidence that was never collected is
 not evidence that passed.
@@ -435,7 +435,7 @@ default policy escalates to, all with `DEMO_OPERATOR_PASSWORD` (default
 
 | Account | Role | Settles |
 |---|---|---|
-| `usr_cargo_supervisor_01` | `ROLE_CARGO_SUPERVISOR` | HIGH_VALUE cargo, releases outside working hours |
+| `usr_cargo_supervisor_01` | `ROLE_CARGO_SUPERVISOR` | HIGH_VALUE cargo |
 | `usr_security_officer_01` | `ROLE_SECURITY_OFFICER` | WEAPONS, recent SIM swaps |
 | `usr_safety_officer_01` | `ROLE_SAFETY_OFFICER` | HAZARDOUS |
 | `usr_compliance_officer_01` | `ROLE_COMPLIANCE_OFFICER` | CONTROLLED_SUBSTANCE |
@@ -450,8 +450,8 @@ signs in to the mobile app.
 - `PUT /v1/actors/{actor_id}/permissions`: Replaces an actor's permissions. `expected_permissions` is what the editor was showing; a mismatch is refused with 409 rather than overwriting a concurrent edit.
 
 ### Policy
-- `GET /v1/policy/config`: The restricted-category map and operational window the engine is running with.
-- `PUT /v1/policy/config`: Saves both, and rebinds the running engine.
+- `GET /v1/policy/config`: The restricted-category map the engine is running with.
+- `PUT /v1/policy/config`: Saves it, and rebinds the running engine. The retired `window_start_hour` / `window_end_hour` fields are accepted and ignored.
 - `GET /v1/policy/categories`: The cargo categories a request can carry, each marked with the authority it escalates to.
 - `GET /v1/policy/zones`: The geofences the evidence gateway verifies device location against — the same circles the console map draws.
 

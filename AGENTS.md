@@ -80,7 +80,7 @@ Deterministic policy rules always override AI recommendations:
 - `AI recommends APPROVE` + `location_verified == False` = **`DENY`**.
 - `AI recommends APPROVE` + `number_verified != True` = **`DENY`**.
 - `AI recommends APPROVE` + `permission mismatch` = **`DENY`**.
-- `high_value` + `outside_expected_window` = **`HOLD`** (requires human supervisor transfer).
+- `restricted category` = **`HOLD`** (requires the authority named for that category). The hour of a request never holds it.
 - `recent_sim_swap` + `high_value` = **`HOLD`** (requires security officer transfer).
 
 ### Invariant D: Zova Thread Pinning

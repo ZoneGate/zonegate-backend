@@ -106,8 +106,6 @@ async def test_policy_config_round_trips_and_rebinds_the_engine():
             "/v1/policy/config",
             json={
                 "restricted_categories": {"PERISHABLE": "ROLE_COLD_CHAIN_LEAD"},
-                "window_start_hour": 5,
-                "window_end_hour": 19,
             },
         )
         assert response.status_code == 200
@@ -116,35 +114,6 @@ async def test_policy_config_round_trips_and_rebinds_the_engine():
         assert engine.config.authority_for("PERISHABLE") == "ROLE_COLD_CHAIN_LEAD"
         # A category dropped from the map stops escalating.
         assert engine.config.authority_for("WEAPONS") is None
-
-        # 19:30 sat inside the default window but falls outside the new one.
-        outside = datetime(2026, 9, 10, 19, 30, tzinfo=timezone.utc)
-        assert engine.is_outside_expected_window(outside) is True
-
-        inside = datetime(2026, 9, 10, 5, 30, tzinfo=timezone.utc)
-        assert engine.is_outside_expected_window(inside) is False
-
-
-@pytest.mark.asyncio
-async def test_policy_config_rejects_an_inverted_window():
-    """A window that closes before it opens would silently disable the rule."""
-    app = create_app(_test_settings())
-
-    async with AsyncTestClient(app=app) as client:
-        response = await client.put(
-            "/v1/policy/config",
-            json={
-                "window_start_hour": 20,
-                "window_end_hour": 6,
-            },
-        )
-
-        assert response.status_code >= 400
-
-        # The engine keeps the configuration it was already running with.
-        engine = app.state.auth_service.policy_engine
-        assert engine.config.window_start_hour == 6
-        assert engine.config.window_end_hour == 20
 
 
 @pytest.mark.asyncio
@@ -157,8 +126,6 @@ async def test_stored_policy_config_is_loaded_on_startup():
         await first.state.store.save_policy_config(
             PolicyConfig(
                 restricted_categories={"HAZARDOUS": "ROLE_SAFETY_OFFICER"},
-                window_start_hour=7,
-                window_end_hour=18,
             )
         )
         # The in-memory store dies with the app, so assert against this one.
@@ -166,4 +133,3 @@ async def test_stored_policy_config_is_loaded_on_startup():
 
     assert stored is not None
     assert stored.restricted_categories == {"HAZARDOUS": "ROLE_SAFETY_OFFICER"}
-    assert stored.window_start_hour == 7

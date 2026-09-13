@@ -319,59 +319,24 @@ def test_a_restricted_category_with_no_authority_is_rejected_as_configuration():
 
 
 # ---------------------------------------------------------------------------
-# Rule 6 — the operational window
+# The hour a release is requested at
 # ---------------------------------------------------------------------------
 
 
-def test_outside_the_window_holds_for_the_cargo_supervisor():
+@pytest.mark.parametrize("hour", [0, 3, 14, 23])
+def test_the_hour_of_a_request_never_changes_the_outcome(hour):
+    """There is no operational window: a clean night release approves like one at noon."""
     decision = PolicyEngine().evaluate(
-        transaction=transaction(category="GENERAL", hour=3),
+        transaction=transaction(category="GENERAL", hour=hour),
         actor=actor(),
         evidence=evidence(),
     )
 
-    assert decision.decision == DecisionOutcome.HOLD
-    assert decision.required_authority == "ROLE_CARGO_SUPERVISOR"
+    assert decision.decision == DecisionOutcome.APPROVE
+    assert decision.required_authority is None
 
 
-@pytest.mark.parametrize(
-    "hour,outside",
-    [
-        (5, True),   # the hour before the window opens
-        (6, False),  # the window opens on this hour
-        (19, False), # still the last hour inside
-        (20, True),  # the window closes on this hour
-        (0, True),
-        (23, True),
-    ],
-)
-def test_window_boundaries_are_inclusive_of_start_and_exclusive_of_end(hour, outside):
-    engine = PolicyEngine()
-    stamp = datetime(2026, 9, 10, hour, 0, tzinfo=timezone.utc)
-
-    assert engine.is_outside_expected_window(stamp) is outside
-
-
-def test_a_retuned_window_changes_which_requests_are_held():
-    engine = PolicyEngine(config=PolicyConfig(window_start_hour=8, window_end_hour=17))
-
-    # 07:30 sits inside the default window but outside this one.
-    held = engine.evaluate(
-        transaction=transaction(hour=7),
-        actor=actor(),
-        evidence=evidence(),
-    )
-    assert held.decision == DecisionOutcome.HOLD
-
-    approved = engine.evaluate(
-        transaction=transaction(hour=9),
-        actor=actor(),
-        evidence=evidence(),
-    )
-    assert approved.decision == DecisionOutcome.APPROVE
-
-
-def test_the_category_hold_outranks_the_window_hold():
+def test_a_restricted_category_is_held_at_any_hour():
     decision = PolicyEngine().evaluate(
         transaction=transaction(category="HAZARDOUS", hour=3),
         actor=actor(),
@@ -392,11 +357,11 @@ def test_a_deny_outranks_every_hold_rule():
 
 
 # ---------------------------------------------------------------------------
-# Rule 7 — approval, and what never influences it
+# Rule 6 — approval, and what never influences it
 # ---------------------------------------------------------------------------
 
 
-def test_clean_evidence_inside_the_window_approves():
+def test_clean_evidence_on_an_unrestricted_category_approves():
     decision = PolicyEngine().evaluate(
         transaction=transaction(),
         actor=actor(),
